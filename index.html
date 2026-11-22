@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="tokiko (KUDA v0.1) — 61KB・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
+<meta name="twitter:card" content="player">
+<meta name="twitter:title" content="tokiko / KUDA v0.1 — 61KB・重み0Bの仮想発声器官（純JS）">
+<meta name="twitter:description" content="録音0Byte・学習モデルなし。4分岐ケリー・ロックバウム声道導波管（口31+鼻23+副鼻腔10+梨状窩3）だけで日本語を喋る純JS仮想発声器官。カード上でそのまま声道を動かして聴けます。">
+<meta name="twitter:image" content="https://poidowl.github.io/tokiko/assets/tokiko_square.jpg">
+<meta name="twitter:player" content="https://poidowl.github.io/tokiko/player.html?v=v0.1">
+<meta name="twitter:player:width" content="480">
+<meta name="twitter:player:height" content="480">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://poidowl.github.io/tokiko/">
+<meta property="og:title" content="tokiko / KUDA v0.1 — 61KB・重み0Bの仮想発声器官（純JS）">
+<meta property="og:description" content="録音0Byte・学習モデルなし。4分岐声道導波管だけで日本語を喋る純JS仮想発声器官。">
+<meta property="og:image" content="https://poidowl.github.io/tokiko/assets/tokiko_square.jpg">
+<meta property="og:image:width" content="1024">
+<meta property="og:image:height" content="1024">
+<title>tokiko / KUDA v0.1 — 仮想発声器官 | poidowl/tokiko</title>
+<style>
+  :root {
+    --bg: #080a0d;
+    --surface: #12171e;
+    --border: #232c37;
+    --text: #f2ede4;
+    --muted: #8f9ba8;
+    --dim: #667280;
+    --accent: #e85d3f;
+    --brass: #d99b38;
+    --teal: #2ca58d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 14px 36px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .frame-shell {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 480px;
+    max-height: 480px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0c0f12;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.52);
+  }
+  .frame-shell iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .btn:hover { border-color: var(--teal); color: var(--teal); }
+  .btn.primary {
+    background: var(--accent);
+    color: #fffaf5;
+    border-color: var(--accent);
+  }
+  .btn.primary:hover { opacity: 0.92; color: #fffaf5; }
+  .ver-panel {
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .ver-panel .vh {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--dim);
+  }
+  .ver-panel strong { color: var(--brass); }
+  @media (max-width: 500px) {
+    body { padding: 12px 8px 24px; }
+    .frame-shell { aspect-ratio: auto; height: 480px; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="frame-shell">
+    <iframe src="./player.html?v=v0.1" title="tokiko / KUDA v0.1 正方形ライブプレイヤー"
+      sandbox="allow-popups allow-same-origin allow-scripts allow-presentation allow-downloads"></iframe>
+  </div>
+
+  <div class="actions">
+    <button id="copyUrlBtn" class="btn primary" type="button">X投稿用URLをコピー</button>
+    <a class="btn" href="https://github.com/poidowl/tokiko" target="_blank" rel="noopener noreferrer">GitHub (62KB 純JS) ↗</a>
+  </div>
+
+  <section class="ver-panel" aria-label="バージョン情報">
+    <div class="vh">
+      <span><strong>v0.1</strong> · Virtual Vocal Organ KUDA</span>
+      <span>MIT · 0B Weights</span>
+    </div>
+    <div>変更内容: 4分岐声道管(31+23+10+3)独立化・歯茎高域破裂・無声/p/気音・後舌拗音・語頭/j/破擦</div>
+  </section>
+</main>
+<script>
+document.getElementById("copyUrlBtn").addEventListener("click", function () {
+  const url = "https://poidowl.github.io/tokiko/";
+  const btn = this;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      btn.textContent = "✓ コピーしました";
+      setTimeout(() => { btn.textContent = "X投稿用URLをコピー"; }, 2000);
+    });
+  }
+});
+</script>
+</body>
+</html>
