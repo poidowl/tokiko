@@ -369,14 +369,14 @@ const playerHtml = `<!DOCTYPE html>
   </div>
 
   <div class="input-row">
-    <input id="kanaInput" class="kana-input" type="text" value="しじゅほ'ーしょー、げ'っと/す'っぞ！" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ）">
+    <input id="kanaInput" class="kana-input" type="text" value="ジャバスクリプトで、しゃべってまーす！" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ）">
     <button id="playBtn" class="play-btn" type="button">▶ しゃべる</button>
   </div>
 
   <div class="samples">
-    <button class="sample-btn active" type="button" data-text="しじゅほ'ーしょー、げ'っと/す'っぞ！">紫綬褒章！</button>
+    <button class="sample-btn active" type="button" data-text="ジャバスクリプトで、しゃべってまーす！">JSで喋る!</button>
     <button class="sample-btn" type="button" data-text="だいじょうぶ、きっと、うまく、いくよ">大丈夫</button>
-    <button class="sample-btn" type="button" data-text="わたし、にほんご、ちょっとしゃべれます">にほんご</button>
+    <button class="sample-btn" type="button" data-text="ありがとう、すごく、うれしかったよ">ありがとう</button>
     <button class="sample-btn" type="button" data-text="こんばんは、おつかれさま、ゆっくり、やすんでね">お疲れ様</button>
   </div>
 
