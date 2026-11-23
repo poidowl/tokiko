@@ -45,6 +45,8 @@ const { wav, samples, sr } = synthKuda("だいじょうぶ、きっと、うま�
 
 入力テキストはひらがな・カタカナを受け付けます。`'` でアクセント核、`/` で句境界、読点 `、` で小休止を指定できます。
 
+人間向けの物理背景・コード対応表・参考文献は [README4HUMAN.md](./README4HUMAN.md) にまとめています。
+
 ## ライセンス
 
 [MIT License](./LICENSE)
