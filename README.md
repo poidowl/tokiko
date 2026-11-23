@@ -6,7 +6,7 @@
 
 Node.js / ブラウザの両方でそのまま動作し、発声器官の全ソースコードをローカル LLM のコンテキストに丸ごと収容できるサイズに保っています。
 
-- **ライブデモ（X 正方形プレイヤーカード）**：https://poidowl.github.io/tokiko/（再生成: `node tools/build_player.mjs`）
+- **ライブデモ（X 正方形プレイヤーカード）**：[https://poidowl.github.io/tokiko/](https://poidowl.github.io/tokiko/) （再生成: `node tools/build_player.mjs`）
 
 ## 特徴
 
