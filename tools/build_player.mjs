@@ -9,9 +9,9 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1.2";
-const PLAYER_REV = "v0.1.2";
-const VERSION_NOTE = "ローマ字・英字入力対応 (konnichiwa / JavaScript等) ＋ 開けた瞬間自動発話 ＋ 息もれ/倍速(0.5x–2.0x)スライダ";
+const VERSION = "v0.1.3-nama";
+const PLAYER_REV = "v0.1.3-nama";
+const VERSION_NOTE = "生身物理(nama)全部入れ：肺活量＋読点吸気音＆F0連動＋舌速度上限＋低音声道長ストレッチ＋音域声帯レジスター";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
@@ -420,6 +420,7 @@ const playerHtml = `<!DOCTYPE html>
       <button class="preset-btn" type="button" data-preset="genki">genki</button>
     </div>
     <div class="tools-right">
+      <button id="namaBtn" class="mini-btn" type="button" title="生身物理(肺活量・吸気音・舌慣性・声道長・レジスター)切替">生 nama ON</button>
       <button id="seedBtn" class="mini-btn" type="button" title="乱数シード切替">🎲 seed 2024</button>
     </div>
   </div>
@@ -461,6 +462,7 @@ const elTractHud = document.getElementById("tractHud");
 const elWaveHud = document.getElementById("waveHud");
 const elAutoPill = document.getElementById("autoPill");
 const elSynthStat = document.getElementById("synthStat");
+const elNama = document.getElementById("namaBtn");
 const elSeed = document.getElementById("seedBtn");
 const slHz = document.getElementById("slHz");
 const slBreath = document.getElementById("slBreath");
@@ -475,6 +477,7 @@ const BREATH_PRESET_PCT = { kawaii: 30, amae: 42, genki: 26 };
 
 let curPreset = "kawaii";
 let curSeed = 2024;
+let curNama = true;
 let audioCtx = null;
 let analyser = null;
 let liveFreq = new Float32Array(1024);
@@ -533,6 +536,7 @@ function getOpts() {
     hz: Number(slHz.value),
     rate: getDurationRate(),
     seed: curSeed,
+    nama: curNama,
     srOut: 24000,
   }, breath);
 }
@@ -781,9 +785,10 @@ function drawScope(progress) {
   ctx.fillText("声門", tx0, h - 6);
   ctx.fillText("鼻腔", tx1 - 24, nasalY - 9);
   ctx.fillText("唇", tx1 - 12, h - 6);
+  const airPct = sc.airTr ? Math.round((sc.airTr[fIdx] ?? 1) * 100) : 100;
   elTractHud.textContent = progress >= 0
-    ? ("声道管 · F0 " + Math.round(f0) + "Hz" + (vel > 0.4 ? " · 鼻" : fric > 0.25 ? " · 乱流" : ""))
-    : "声道管 M=31+23+10+3";
+    ? ("声道管 · F0 " + Math.round(f0) + "Hz" + (curNama ? (" · 肺" + airPct + "%") : "") + (vel > 0.4 ? " · 鼻" : fric > 0.25 ? " · 乱流" : ""))
+    : ("声道管 M=31+23+10+3" + (curNama ? " · nama" : ""));
 
   // --- RIGHT TOP: Waveform + Playhead ---
   const rx0 = splitX + 10, rw = Math.max(24, w - rx0 - 10);
@@ -904,6 +909,13 @@ for (const sl of [slHz, slBreath, slRate]) {
   sl.addEventListener("input", updateKnobText);
   sl.addEventListener("change", () => startPlay());
 }
+
+elNama.addEventListener("click", () => {
+  curNama = !curNama;
+  elNama.textContent = curNama ? "生 nama ON" : "生 nama OFF";
+  elNama.style.opacity = curNama ? "1" : "0.6";
+  startPlay();
+});
 
 elSeed.addEventListener("click", () => {
   curSeed = curSeed >= 2039 ? 2024 : curSeed + 1;

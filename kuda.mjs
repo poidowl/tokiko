@@ -606,6 +606,11 @@ function buildScore(text, opts = {}) {
     scoop = 1.54,
     flatTiming = false,
     seed = 2024,
+    asp = 0.044,
+    aspMid = 0.175,
+    nama = true,
+    lungCap = 1.0,
+    inhale = 1.0,
   } = opts;
 
   const rawMs = parseMoras(text);
@@ -813,10 +818,26 @@ function buildScore(text, opts = {}) {
 
   for (let j = 0; j < M; j++) {
     const sm = smooth1(rawA[j], 18);
-    for (let t = 0; t < n; t++) {
-      const sec = t * fpz;
-      const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
-      A_tr[t][j] = Math.max(0.20, sm[t] * sway);
+    if (nama) {
+      // Physical articulator velocity limits (cm^2/s): pharynx/tongue-root slowest, tip/lips nimblest
+      const maxVel = j <= 4 ? 42.0 : (j <= 14 ? 26.0 : (j <= 24 ? 32.0 : 44.0));
+      const maxStep = maxVel * fpz;
+      let prevA = sm[0];
+      for (let t = 0; t < n; t++) {
+        const d = sm[t] - prevA;
+        if (d > maxStep) prevA += maxStep;
+        else if (d < -maxStep) prevA -= maxStep;
+        else prevA = sm[t];
+        const sec = t * fpz;
+        const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
+        A_tr[t][j] = Math.max(0.20, prevA * sway);
+      }
+    } else {
+      for (let t = 0; t < n; t++) {
+        const sec = t * fpz;
+        const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
+        A_tr[t][j] = Math.max(0.20, sm[t] * sway);
+      }
     }
   }
 
@@ -1182,7 +1203,131 @@ function buildScore(text, opts = {}) {
     for (let t = 0; t < n; t++) f0_fr[t] *= Math.pow(2.0, smMicro[t] / 12.0);
   }
 
-  return { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, events };
+  const airTr = new Float64Array(n).fill(1.0);
+  let breathExcess = 0.0;
+  let lowPitchFactor = 0.0;
+
+  if (nama) {
+    breathExcess = Math.max(0.0, (aspMid - 0.22) / 0.83) * 0.65 + Math.max(0.0, (rd_base - 1.55) / 1.35) * 0.35;
+    lowPitchFactor = Math.max(0.0, Math.min(1.0, (240.0 - hz) / 110.0));
+
+    // 1) Finite-lung air reservoir (V_lung) + breathy soft onset ramp
+    const cap = Math.max(0.3, lungCap);
+    const baseDrain = 0.032 / cap;
+    const leakDrain = (0.42 * breathExcess) / cap;
+    const inhaleRate = 1.75;
+    const softAttackSec = 0.015 + 0.075 * breathExcess + 0.035 * breathExcess * lowPitchFactor;
+
+    const onsetEnv = new Float64Array(n);
+    const isSpeakingArr = new Uint8Array(n);
+    let air = 1.0;
+    let activeRunSec = 0.0;
+    let silentRunSec = 0.5;
+
+    for (let t = 0; t < n; t++) {
+      const speechAct = Math.max(voSm[t], 0.7 * fricSm[t]);
+      const isSp = speechAct > 0.05;
+      isSpeakingArr[t] = isSp ? 1 : 0;
+      if (isSp) {
+        const flow = baseDrain * speechAct + leakDrain * (0.40 * speechAct + 0.60 * voSm[t]) * (1.0 + 0.55 * sighSm[t]);
+        air = Math.max(0.22, air - flow * fpz);
+        if (silentRunSec > 0.05) activeRunSec = 0.0;
+        activeRunSec += fpz;
+        silentRunSec = 0.0;
+      } else {
+        air = Math.min(1.0, air + inhaleRate * (1.0 - air * 0.30) * fpz);
+        silentRunSec += fpz;
+        if (silentRunSec > 0.05) activeRunSec = 0.0;
+      }
+      airTr[t] = air;
+
+      if (breathExcess > 0.02 && isSp && activeRunSec < softAttackSec) {
+        const u = activeRunSec / softAttackSec;
+        onsetEnv[t] = 0.14 + 0.86 * (0.5 - 0.5 * Math.cos(Math.PI * u));
+      } else {
+        onsetEnv[t] = 1.0;
+      }
+    }
+
+    // Apply elastic lung pressure taper, soft onset, consonant airflow coupling, dF0/dP_sub, and high-register falsetto
+    for (let t = 0; t < n; t++) {
+      const a = airTr[t];
+      const lowAir = Math.max(0.0, (0.88 - a) / 0.66);
+      const lungPresScale = 1.0 - (0.05 + 0.34 * breathExcess) * Math.pow(lowAir, 1.15);
+      const aeroScale = lungPresScale * onsetEnv[t];
+
+      const openCap = breathExcess > 0.05 && pLungSm[t] > 1.0
+        ? (1.0 + (pLungSm[t] - 1.0) * (1.0 - 0.65 * breathExcess))
+        : pLungSm[t];
+      pLungSm[t] = openCap * aeroScale;
+
+      if (aeroScale < 0.999) {
+        sibAlvFricSm[t] *= aeroScale;
+        sibPalFricSm[t] *= aeroScale;
+        broadFricSm[t]  *= aeroScale;
+        glotFricSm[t]   *= aeroScale;
+        burstSm[t]      *= aeroScale;
+        labPopSm[t]     *= aeroScale;
+      }
+
+      if (breathExcess > 0.05 && lowAir > 0.05) {
+        rdSm[t] = Math.min(3.7, rdSm[t] + 0.38 * breathExcess * lowAir);
+      }
+
+      // Subglottal pressure -> F0 physiological coupling (dF0 / dP_sub)
+      if (!flatHz && !(uta_hz && uta_hz.length) && lowAir > 0.02) {
+        const dropSt = 0.52 * (0.22 + 0.78 * breathExcess) * Math.pow(lowAir, 1.2);
+        f0_fr[t] *= Math.pow(2.0, -dropSt / 12.0);
+      }
+
+      // High-register head-voice / falsetto hint above 365 Hz (zero effect on normal 296 Hz kawaii)
+      if (f0_fr[t] > 365.0) {
+        const falsAmt = Math.min(1.0, (f0_fr[t] - 365.0) / 125.0);
+        rdSm[t] = Math.min(3.7, rdSm[t] + 0.52 * falsAmt);
+        chinkSm[t] = Math.min(0.62, chinkSm[t] + 0.11 * falsAmt);
+        sighSm[t] = Math.min(1.0, sighSm[t] + 0.14 * falsAmt);
+      }
+    }
+
+    // 2) Natural mid-utterance inhale sound ("su...") during pauses after meaningful lung air usage
+    if (inhale > 0.01) {
+      let lastSp = -1, firstSp = -1;
+      for (let t = 0; t < n; t++) {
+        if (isSpeakingArr[t]) {
+          if (firstSp < 0) firstSp = t;
+          lastSp = t;
+        }
+      }
+      if (firstSp >= 0 && lastSp > firstSp) {
+        let t = firstSp;
+        while (t < lastSp) {
+          if (isSpeakingArr[t]) { t++; continue; }
+          const p0 = t;
+          while (t < lastSp && !isSpeakingArr[t]) t++;
+          const p1 = t;
+          const pauDur = (p1 - p0) * fpz;
+          const airBefore = p0 > 0 ? airTr[p0 - 1] : 1.0;
+          if (pauDur >= 0.11 && airBefore < 0.91) {
+            const depth = Math.min(1.0, (0.91 - airBefore) / 0.55);
+            const inhDur = Math.min(0.145, pauDur * 0.62);
+            const inhFrames = Math.max(4, Math.floor(inhDur / fpz));
+            const iEnd = Math.max(p0 + 1, p1 - 2);
+            const iStart = Math.max(p0 + 1, iEnd - inhFrames);
+            const peakAmp = (0.042 + 0.175 * depth) * Math.min(2.0, inhale);
+            for (let k = iStart; k < iEnd; k++) {
+              const u = (k - iStart) / Math.max(1, iEnd - iStart - 1);
+              const env = Math.pow(Math.sin(Math.PI * u), 1.8);
+              glotFricSm[k] = Math.max(glotFricSm[k], peakAmp * env);
+              velSm[k] = Math.max(velSm[k], 0.14 * env);
+              fricJ_tr[k] = 2;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, events, airTr, breathExcess, lowPitchFactor };
 }
 
 function applyAntiAliasLpf(buf, srIn, cutoffHz) {
@@ -1217,12 +1362,32 @@ export function synthKuda(text, opts = {}) {
     aspMid = 0.175,
     bernS = 3.58,
     srOut = 24000,
+    hz = 296.0,
+    nama = true,
+    tractScale = "auto",
   } = merged;
 
   const sc = buildScore(text, merged);
-  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool } = sc;
-  const N = Math.max(1, Math.trunc(n * fpz * SR));
+  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, airTr, breathExcess, lowPitchFactor } = sc;
+
+  // Anatomical vocal-tract length scaling across all 4 branches (young female 1.0x @ 250-360Hz -> adult male ~1.19x @ 140Hz, high soprano ~0.95x @ 440Hz)
+  let effTractScale = 1.0;
+  if (nama) {
+    if (typeof tractScale === "number" && Number.isFinite(tractScale)) {
+      effTractScale = Math.max(0.82, Math.min(1.35, tractScale));
+    } else {
+      const refHz = (typeof merged.flatHz === "number" && merged.flatHz > 0) ? merged.flatHz : hz;
+      if (refHz < 250.0) effTractScale = 1.0 + 0.20 * Math.min(1.0, (250.0 - refHz) / 115.0);
+      else if (refHz > 360.0) effTractScale = 1.0 - 0.06 * Math.min(1.0, (refHz - 360.0) / 100.0);
+    }
+  }
+  const srWg = SR / effTractScale;
+  const N = Math.max(1, Math.trunc(n * fpz * srWg));
   const rng = makeRng(seed);
+
+  // Radiated voiced energy drops at low F0 (+6 dB/oct lip radiation); match high-aspiration jet so deep breathy voices stay silky
+  const effAsp = nama ? asp * (1.0 - 0.35 * breathExcess * lowPitchFactor) : asp;
+  const effAspMid = nama ? aspMid * (1.0 - 0.52 * breathExcess * lowPitchFactor) : aspMid;
 
   const R = new Float64Array(M), L = new Float64Array(M);
   const Rn = new Float64Array(M), Ln = new Float64Array(M);
@@ -1241,7 +1406,7 @@ export function synthKuda(text, opts = {}) {
   const rawOut = new Float32Array(N);
 
   let ph = 0.0, lpRet1 = 0.0, lpRet2 = 0.0;
-  let cycJit = 0.0, cycShim = 0.0, cycMuc = 0.0, cycTp = 0.0;
+  let cycJit = 0.0, cycShim = 0.0, cycMuc = 0.0, cycTp = 0.0, cycParity = 1.0;
   let radLipState = 0.0, radNosState = 0.0, viscLp1 = 0.0, viscLp2 = 0.0;
   let hp1 = 0.0, hp2 = 0.0, lpA1 = 0.0, lpA2 = 0.0, wPrev = 0.0, hp1Prev = 0.0;
   let mHp = 0.0, mWPrev = 0.0, mLp1 = 0.0, mLp2 = 0.0, mLp3 = 0.0;
@@ -1256,8 +1421,8 @@ export function synthKuda(text, opts = {}) {
   const cheekLoss = 0.9970;
   const epiLoss = 0.9982;
   const nasalLoss = 0.9920;
-  const wgSR = 2 * SR;
-  const frameStepSamples = fpz * SR;
+  const wgSR = 2 * srWg;
+  const frameStepSamples = fpz * srWg;
 
   for (let i = 0; i < N; i++) {
     const fPos = i / frameStepSamples;
@@ -1305,13 +1470,19 @@ export function synthKuda(text, opts = {}) {
     const acSinus = 0.18;
     const velGate = Math.min(1.0, velA / 0.12);
 
+    // Low-register lax vocal fold hint (vocal fry subharmonic alternation below 175 Hz; 0 on female voices)
+    const fryAmt = nama && f0 < 175.0 ? Math.min(1.0, (175.0 - f0) / 75.0) : 0.0;
+
     let sampleOut = 0.0;
 
     for (let sub = 0; sub < 2; sub++) {
-      const periodTicks = wgSR / Math.max(70.0, f0 * (1.0 + 0.0148 * cycJit));
+      const jitScale = 1.0 + 0.45 * fryAmt;
+      const fryPer = 1.0 + 0.028 * fryAmt * cycParity;
+      const periodTicks = (wgSR / Math.max(70.0, f0 * (1.0 + 0.0148 * jitScale * cycJit))) * fryPer;
       ph += 1.0 / periodTicks;
       if (ph >= 1.0) {
         ph -= 1.0;
+        cycParity = -cycParity;
         const gRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
         const mRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
         const tRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
@@ -1339,7 +1510,8 @@ export function synthKuda(text, opts = {}) {
       lpRet2 = (1.0 - aTa2) * lpRet1 + aTa2 * lpRet2;
 
       const pLoad = Math.tanh(L[0] * 1.3);
-      const uGlot = vo * pLung * (1.0 + cycShim) * lpRet2 * (1.0 - 0.08 * pLoad);
+      const fryAmp = 1.0 + 0.075 * fryAmt * cycParity;
+      const uGlot = vo * pLung * (1.0 + cycShim) * fryAmp * lpRet2 * (1.0 - 0.08 * pLoad);
 
       const w = rng.uniform(-1.0, 1.0);
       const h1 = 0.72 * (hp1 + w - wPrev); wPrev = w; hp1 = h1;
@@ -1356,7 +1528,7 @@ export function synthKuda(text, opts = {}) {
       const openMod = 0.26 + 0.74 * Math.min(1.4, lpRet2);
       const breathMult = 1.0 + 2.1 * sigh + 0.34 * Math.max(0, rd - 1.45);
       const glotH = (1.0 - vo) * glotF * 1.50 * (0.72 * mLp3 + 0.28 * lpA2);
-      const glotJet = (vo * pLung * openMod * breathMult * (asp * lpA2 * 0.44 + aspMid * mLp3 * 0.78) + glotH);
+      const glotJet = (vo * pLung * openMod * breathMult * (effAsp * lpA2 * 0.44 + effAspMid * mLp3 * 0.78) + glotH);
 
       const rg = 0.920 - 0.130 * vo * Math.min(1.2, lpRet2);
       Rn[0] = (uGlot + glotJet) + rg * L[0];
@@ -1474,7 +1646,7 @@ export function synthKuda(text, opts = {}) {
     let ax1 = 0.0, ay1 = 0.0;
     for (let i = 0; i < N; i++) {
       const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
-      const sec = i / SR;
+      const sec = i / srWg;
       const ap = Math.max(-0.78, Math.min(0.78, apBase + 0.08 * Math.tanh((A_tr[fIdx][24] - 2.4) * 0.5) + apMod * Math.sin(2 * Math.PI * fMod * sec + ph0)));
       const xi = rawOut[i], yi = ap * xi + ax1 - ap * ay1;
       ax1 = xi; ay1 = yi; rawOut[i] = yi;
@@ -1482,7 +1654,7 @@ export function synthKuda(text, opts = {}) {
   }
 
   {
-    const win = Math.trunc(0.065 * SR);
+    const win = Math.trunc(0.065 * srWg);
     const rmsArr = new Float64Array(N);
     let sqSum = 0.0;
     for (let i = 0; i < N; i++) {
@@ -1492,15 +1664,26 @@ export function synthKuda(text, opts = {}) {
     }
     const vRmsList = [];
     for (let t = 0; t < n; t++) {
-      if (voicedBool[t] && sighSm[t] < 0.2) vRmsList.push(rmsArr[Math.min(N - 1, Math.trunc((t + 0.5) * fpz * SR))]);
+      if (voicedBool[t] && sighSm[t] < 0.2) vRmsList.push(rmsArr[Math.min(N - 1, Math.trunc((t + 0.5) * fpz * srWg))]);
     }
     vRmsList.sort((a, b) => a - b);
     const refRms = vRmsList.length ? vRmsList[Math.floor(vRmsList.length * 0.65)] : 0.1;
     let gSm = 1.0;
+    let activeWin = 0.0;
+    const actRise = 1.0 / (0.085 * srWg);
+    const actFall = 1.0 / (0.030 * srWg);
     for (let i = 0; i < N; i++) {
       const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
       const active = Math.min(1.0, voSm[fIdx] + 0.85 * fricSm[fIdx]) * (1.0 - 0.72 * sighSm[fIdx]);
-      const ratio = Math.min(1.65, Math.max(0.76, refRms / (rmsArr[i] + 0.24 * refRms)));
+      let ratio = Math.min(1.65, Math.max(0.76, refRms / (rmsArr[i] + 0.24 * refRms)));
+      if (nama) {
+        if (active > 0.15) activeWin = Math.min(1.0, activeWin + actRise);
+        else activeWin = Math.max(0.0, activeWin - actFall);
+        if (ratio > 1.0) {
+          const lungRespect = 1.0 - 0.75 * breathExcess * Math.max(0.0, 1.0 - airTr[fIdx]);
+          ratio = 1.0 + (ratio - 1.0) * activeWin * lungRespect;
+        }
+      }
       const targetG = 1.0 + 0.26 * active * (ratio - 1.0);
       gSm = 0.9985 * gSm + 0.0015 * targetG;
       rawOut[i] *= gSm;
@@ -1512,7 +1695,7 @@ export function synthKuda(text, opts = {}) {
   for (let i = 0; i < N; i++) { const a = Math.abs(rawOut[i]); if (a > pk) pk = a; sq += rawOut[i] * rawOut[i]; }
   const rawRms = Math.sqrt(sq / N);
   const gNorm = pk > 1e-9 ? Math.min(0.85 / pk, 0.082 / Math.max(1e-6, rawRms)) : 0.0;
-  const edgeFade = Math.min(Math.trunc(0.15 * SR), Math.floor(N / 4));
+  const edgeFade = Math.min(Math.trunc(0.15 * srWg), Math.floor(N / 4));
   for (let i = 0; i < N; i++) {
     const rn = rng.uniform(-1.0, 1.0);
     roomLp1 = 0.90 * roomLp1 + 0.10 * rn;
@@ -1522,11 +1705,11 @@ export function synthKuda(text, opts = {}) {
   }
 
   let samples = out44;
-  if (srOut !== SR) {
-    const src = srOut < SR ? applyAntiAliasLpf(out44, SR, srOut * 0.46) : out44;
-    const nOut = Math.max(1, Math.round(N * srOut / SR));
+  if (Math.abs(srOut - srWg) > 0.5) {
+    const src = srOut < srWg ? applyAntiAliasLpf(out44, srWg, srOut * 0.46) : out44;
+    const nOut = Math.max(1, Math.round(N * srOut / srWg));
     samples = new Float32Array(nOut);
-    const ratio = SR / srOut;
+    const ratio = srWg / srOut;
     for (let i = 0; i < nOut; i++) {
       const p = i * ratio;
       const k0 = Math.min(N - 1, Math.floor(p)), f = p - k0;
@@ -1539,29 +1722,33 @@ export function synthKuda(text, opts = {}) {
 
 
 // CLI entrypoint (Node.js only; completely skipped in browsers):
-// node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat 305] -o out.wav "テキスト"
+// node kuda.mjs [--preset kawaii|amae|genki] [--hz 296] [--no-nama] [--sr 24000|44100] [--flat 305] -o out.wav "テキスト"
 if (typeof process !== "undefined" && process.versions?.node && process.argv?.[1]) {
   const { pathToFileURL } = await import("node:url");
   if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const fs = await import("node:fs");
     const args = process.argv.slice(2);
-    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, textParts = [];
+    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, hz = undefined, nama = true, textParts = [];
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       if ((a === "-o" || a === "--out") && args[i + 1]) { outPath = args[++i]; }
       else if (a === "--preset" && args[i + 1]) { preset = args[++i]; }
       else if (a === "--sr" && args[i + 1]) { srOut = Number(args[++i]) || 24000; }
       else if (a === "--flat" && args[i + 1]) { flatHz = Number(args[++i]) || null; }
+      else if (a === "--hz" && args[i + 1]) { hz = Number(args[++i]) || undefined; }
+      else if (a === "--no-nama") { nama = false; }
       else if (a === "-h" || a === "--help") {
-        console.log("使い方: node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] -o out.wav \"テキスト\"");
+        console.log("使い方: node kuda.mjs [--preset kawaii|amae|genki] [--hz 296] [--no-nama] [--sr 24000|44100] [--flat Hz] -o out.wav \"テキスト\"");
         process.exit(0);
       } else {
         textParts.push(a);
       }
     }
     const text = textParts.join(" ") || "わたし、にほんご、ちょっとしゃべれます";
-    const res = synthKuda(text, { preset, srOut, flatHz });
+    const opts = { preset, srOut, flatHz, nama };
+    if (hz !== undefined) opts.hz = hz;
+    const res = synthKuda(text, opts);
     fs.writeFileSync(outPath, res.wav);
-    console.log(`KUDA (${preset}, ${res.sr}Hz): wrote ${outPath} (${res.wav.byteLength} bytes, ${(res.samples.length / res.sr).toFixed(2)}s)`);
+    console.log(`KUDA (${preset}${nama ? ", nama" : ""}, ${res.sr}Hz): wrote ${outPath} (${res.wav.byteLength} bytes, ${(res.samples.length / res.sr).toFixed(2)}s)`);
   }
 }
