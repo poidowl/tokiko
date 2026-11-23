@@ -617,13 +617,29 @@ function buildScore(text, opts = {}) {
   const sibPalCav_tr = new Float64Array(n);
   const voicedBool = new Array(n).fill(false);
 
+  // Precompute O(N + E) frame-to-event index and nearest-vowel lookups (eliminates O(N*E) scans)
+  const nEv = events.length;
+  const evIdx = new Int32Array(n).fill(-1);
+  const nextVFrom = new Array(nEv + 1).fill(null);
+  const prevVUpTo = new Array(nEv + 1).fill(null);
+  for (let i = nEv - 1; i >= 0; i--) nextVFrom[i] = events[i].v ? events[i].v : nextVFrom[i + 1];
+  for (let i = 0; i < nEv; i++) prevVUpTo[i + 1] = events[i].v ? events[i].v : prevVUpTo[i];
+  const nextStartIdx = new Int32Array(n);
+  {
+    let ei = 0;
+    for (let t = 0; t < n; t++) {
+      const sec = (t + 0.5) * fpz;
+      while (ei < nEv && events[ei].e <= sec) ei++;
+      evIdx[t] = (ei < nEv && sec >= events[ei].a) ? ei : -1;
+      nextStartIdx[t] = ei;
+    }
+  }
+
   const rawA = Array.from({ length: M }, () => new Float64Array(n));
   for (let t = 0; t < n; t++) {
     const sec = (t + 0.5) * fpz;
-    let ev = null;
-    for (let ei = 0; ei < events.length; ei++) {
-      if (sec >= events[ei].a && sec < events[ei].e) { ev = events[ei]; break; }
-    }
+    const ei = evIdx[t];
+    const ev = ei >= 0 ? events[ei] : null;
     let v = "a";
     let cPostKey = null;
     let cPostW = 0.0;
@@ -632,17 +648,15 @@ function buildScore(text, opts = {}) {
     if (ev) {
       if (ev.v) v = ev.v;
       else if (ev.kind === "Q" || ev.kind === "N") {
-        const nxt = events[events.indexOf(ev) + 1];
-        const prv = events[events.indexOf(ev) - 1];
+        const nxt = events[ei + 1];
+        const prv = events[ei - 1];
         v = nxt?.v || prv?.v || "a";
         if (ev.kind === "N" && ev.nPlace && CPOST[ev.nPlace]) {
           cPostKey = ev.nPlace;
           cPostW = 0.72;
         }
       } else {
-        const nextEv = events.find(e => e.a >= sec && e.v);
-        const prevEv = [...events].reverse().find(e => e.e <= sec && e.v);
-        v = nextEv?.v || prevEv?.v || "a";
+        v = nextVFrom[ei + 1] || prevVUpTo[ei] || "a";
       }
 
       if (ev.kind === "CV" && ev.c) {
@@ -682,9 +696,8 @@ function buildScore(text, opts = {}) {
         }
       }
     } else {
-      const nextEv = events.find(e => e.a >= sec && e.v);
-      const prevEv = [...events].reverse().find(e => e.e <= sec && e.v);
-      v = nextEv?.v || prevEv?.v || "a";
+      const ni = nextStartIdx[t];
+      v = nextVFrom[ni] || prevVUpTo[ni] || "a";
     }
 
     const base = VAREA[v];
@@ -721,7 +734,8 @@ function buildScore(text, opts = {}) {
   chink_tr.fill(0.36);
   for (let t = 0; t < n; t++) {
     const sec = (t + 0.5) * fpz;
-    const ev = events.find(e => sec >= e.a && sec < e.e);
+    const ei = evIdx[t];
+    const ev = ei >= 0 ? events[ei] : null;
     if (!ev || ev.kind === "pau") {
       vo_tr[t] = 0.0;
       pLung_tr[t] = 0.02;
@@ -844,7 +858,7 @@ function buildScore(text, opts = {}) {
         fricJ_tr[t] = CONS_LOC[pl].inj;
       } else if (mn === "fric") {
         const isVL = VOICELESS.has(ev.c);
-        const prevEv = events[events.indexOf(ev) - 1];
+        const prevEv = ei > 0 ? events[ei - 1] : undefined;
         const isAffrStart = !isVL && (!prevEv || prevEv.kind === "pau" || prevEv.kind === "N");
         const affrCut = (ev.c === "j") ? 0.22 : 0.14;
         if (isAffrStart && u < affrCut) {
@@ -1048,7 +1062,8 @@ function buildScore(text, opts = {}) {
       const vNow = voicedBool[t] ? 1 : 0;
       const vPrev = t > 0 && voicedBool[t - 1] ? 1 : 0;
       const sec = (t + 0.5) * fpz;
-      const ev = events.find(e => sec >= e.a && sec < e.e);
+      const ei = evIdx[t];
+      const ev = ei >= 0 ? events[ei] : null;
       if (vNow && !vPrev) {
         if (ev && ev.isPhraseStart) cf0 = flatHz ? -2.00 : -0.50;
         else cf0 = (ev && VOICED_OBS.has(ev.c)) ? -1.15 : (flatHz ? 1.80 : 1.25);
@@ -1070,21 +1085,26 @@ function buildScore(text, opts = {}) {
 }
 
 function applyAntiAliasLpf(buf, srIn, cutoffHz) {
-  const out = new Float32Array(buf.length);
+  // 4th-order zero-ringing Linkwitz-Riley LPF (24 dB/oct, 2 cascaded Q=1/sqrt(2) biquads)
   const w0 = 2.0 * Math.PI * cutoffHz / srIn;
   const cosW = Math.cos(w0), sinW = Math.sin(w0);
   const alpha = sinW / Math.SQRT2;
   const b0 = (1 - cosW) * 0.5, b1 = 1 - cosW, b2 = b0;
   const a0 = 1 + alpha, a1 = -2 * cosW, a2 = 1 - alpha;
   const nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < buf.length; i++) {
-    const x0 = buf[i];
-    const y0 = nb0 * x0 + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2;
-    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
-    out[i] = y0;
+  let src = buf;
+  for (let stage = 0; stage < 2; stage++) {
+    const out = new Float32Array(src.length);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < src.length; i++) {
+      const x0 = src[i];
+      const y0 = nb0 * x0 + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2;
+      x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+      out[i] = y0;
+    }
+    src = out;
   }
-  return out;
+  return src;
 }
 
 export function synthKuda(text, opts = {}) {
@@ -1402,7 +1422,7 @@ export function synthKuda(text, opts = {}) {
 
   let samples = out44;
   if (srOut !== SR) {
-    const src = srOut < SR ? applyAntiAliasLpf(out44, SR, srOut * 0.44) : out44;
+    const src = srOut < SR ? applyAntiAliasLpf(out44, SR, srOut * 0.46) : out44;
     const nOut = Math.max(1, Math.round(N * srOut / SR));
     samples = new Float32Array(nOut);
     const ratio = SR / srOut;

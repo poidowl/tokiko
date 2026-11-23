@@ -9,8 +9,8 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1";
-const VERSION_NOTE = "4分岐声道管(31+23+10+3)独立化・歯茎高域破裂・無声/p/気音・後舌拗音・語頭/j/破擦";
+const VERSION = "v0.1.1";
+const VERSION_NOTE = "4次ゼロリンギングLPF(24dB/oct)で高域折り返し低減・buildScore O(N)化（Train Worst 28.9% / uncanny 35.8）";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
