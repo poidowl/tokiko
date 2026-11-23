@@ -11,7 +11,7 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3-nama";
 const PLAYER_REV = "v0.1.3-nama";
-const VERSION_NOTE = "生身物理(nama)全部入れ：肺活量＋読点吸気音＆F0連動＋舌速度上限＋低音声道長ストレッチ＋音域声帯レジスター";
+const VERSION_NOTE = "生身物理(nama)全部入れ：肺活量＋読点吸気音＆F0連動＋早口舌慣性＋低音声道長ストレッチ＋音域声帯レジスター";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 

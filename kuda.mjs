@@ -816,28 +816,17 @@ function buildScore(text, opts = {}) {
     }
   }
 
+  const fastAmt = nama ? Math.max(0.0, Math.min(1.0, (0.85 - rate) / 0.35)) : 0.0;
   for (let j = 0; j < M; j++) {
-    const sm = smooth1(rawA[j], 18);
-    if (nama) {
-      // Physical articulator velocity limits (cm^2/s): pharynx/tongue-root slowest, tip/lips nimblest
-      const maxVel = j <= 4 ? 42.0 : (j <= 14 ? 26.0 : (j <= 24 ? 32.0 : 44.0));
-      const maxStep = maxVel * fpz;
-      let prevA = sm[0];
-      for (let t = 0; t < n; t++) {
-        const d = sm[t] - prevA;
-        if (d > maxStep) prevA += maxStep;
-        else if (d < -maxStep) prevA -= maxStep;
-        else prevA = sm[t];
-        const sec = t * fpz;
-        const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
-        A_tr[t][j] = Math.max(0.20, prevA * sway);
-      }
-    } else {
-      for (let t = 0; t < n; t++) {
-        const sec = t * fpz;
-        const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
-        A_tr[t][j] = Math.max(0.20, sm[t] * sway);
-      }
+    // Zero-phase anatomical articulator inertia: crisp 18ms at normal 1.0x speed, heavier tongue-root undershoot at 1.2x-2.0x fast speech (zero lag!)
+    const winMs = nama
+      ? (j <= 4 ? 18 : (j <= 14 ? 19 + 14 * fastAmt : (j <= 24 ? 18 + 11 * fastAmt : 18 + 6 * fastAmt)))
+      : 18;
+    const sm = smooth1(rawA[j], winMs);
+    for (let t = 0; t < n; t++) {
+      const sec = t * fpz;
+      const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
+      A_tr[t][j] = Math.max(0.20, sm[t] * sway);
     }
   }
 
@@ -1211,12 +1200,12 @@ function buildScore(text, opts = {}) {
     breathExcess = Math.max(0.0, (aspMid - 0.22) / 0.83) * 0.65 + Math.max(0.0, (rd_base - 1.55) / 1.35) * 0.35;
     lowPitchFactor = Math.max(0.0, Math.min(1.0, (240.0 - hz) / 110.0));
 
-    // 1) Finite-lung air reservoir (V_lung) + breathy soft onset ramp
+    // 1) Finite-lung air reservoir (V_lung) + crisp breathy soft-onset ramp (~45-55ms max so first mora stays sharp)
     const cap = Math.max(0.3, lungCap);
     const baseDrain = 0.032 / cap;
     const leakDrain = (0.42 * breathExcess) / cap;
     const inhaleRate = 1.75;
-    const softAttackSec = 0.015 + 0.075 * breathExcess + 0.035 * breathExcess * lowPitchFactor;
+    const softAttackSec = 0.010 + 0.032 * breathExcess + 0.015 * breathExcess * lowPitchFactor;
 
     const onsetEnv = new Float64Array(n);
     const isSpeakingArr = new Uint8Array(n);
@@ -1225,49 +1214,53 @@ function buildScore(text, opts = {}) {
     let silentRunSec = 0.5;
 
     for (let t = 0; t < n; t++) {
-      const speechAct = Math.max(voSm[t], 0.7 * fricSm[t]);
-      const isSp = speechAct > 0.05;
+      const flowAct = Math.max(voSm[t], 0.7 * fricSm[t], 0.4 * burstSm[t]);
+      const isSp = Math.max(voSm[t], fricSm[t], stopSm[t], burstSm[t], labPopSm[t]) > 0.05;
       isSpeakingArr[t] = isSp ? 1 : 0;
       if (isSp) {
-        const flow = baseDrain * speechAct + leakDrain * (0.40 * speechAct + 0.60 * voSm[t]) * (1.0 + 0.55 * sighSm[t]);
-        air = Math.max(0.22, air - flow * fpz);
-        if (silentRunSec > 0.05) activeRunSec = 0.0;
+        if (flowAct > 0.05) {
+          const flow = baseDrain * flowAct + leakDrain * (0.40 * flowAct + 0.60 * voSm[t]) * (1.0 + 0.55 * sighSm[t]);
+          air = Math.max(0.22, air - flow * fpz);
+        }
+        if (silentRunSec > 0.08) activeRunSec = 0.0;
         activeRunSec += fpz;
         silentRunSec = 0.0;
       } else {
         air = Math.min(1.0, air + inhaleRate * (1.0 - air * 0.30) * fpz);
         silentRunSec += fpz;
-        if (silentRunSec > 0.05) activeRunSec = 0.0;
+        if (silentRunSec > 0.08) activeRunSec = 0.0;
       }
       airTr[t] = air;
 
       if (breathExcess > 0.02 && isSp && activeRunSec < softAttackSec) {
         const u = activeRunSec / softAttackSec;
-        onsetEnv[t] = 0.14 + 0.86 * (0.5 - 0.5 * Math.cos(Math.PI * u));
+        onsetEnv[t] = 0.32 + 0.68 * (0.5 - 0.5 * Math.cos(Math.PI * u));
       } else {
         onsetEnv[t] = 1.0;
       }
     }
 
-    // Apply elastic lung pressure taper, soft onset, consonant airflow coupling, dF0/dP_sub, and high-register falsetto
+    // Apply elastic lung pressure taper, soft onset (voiced phrase starts only!), consonant lung-pressure coupling, dF0/dP_sub, and high-register falsetto
     for (let t = 0; t < n; t++) {
       const a = airTr[t];
       const lowAir = Math.max(0.0, (0.88 - a) / 0.66);
       const lungPresScale = 1.0 - (0.05 + 0.34 * breathExcess) * Math.pow(lowAir, 1.15);
-      const aeroScale = lungPresScale * onsetEnv[t];
 
       const openCap = breathExcess > 0.05 && pLungSm[t] > 1.0
         ? (1.0 + (pLungSm[t] - 1.0) * (1.0 - 0.65 * breathExcess))
         : pLungSm[t];
-      pLungSm[t] = openCap * aeroScale;
+      pLungSm[t] = openCap * lungPresScale * onsetEnv[t];
 
-      if (aeroScale < 0.999) {
-        sibAlvFricSm[t] *= aeroScale;
-        sibPalFricSm[t] *= aeroScale;
-        broadFricSm[t]  *= aeroScale;
-        glotFricSm[t]   *= aeroScale;
-        burstSm[t]      *= aeroScale;
-        labPopSm[t]     *= aeroScale;
+      const sibScale = lungPresScale * (1.0 - 0.24 * lowPitchFactor);
+      if (sibScale < 0.999) {
+        sibAlvFricSm[t] *= sibScale;
+        sibPalFricSm[t] *= sibScale;
+      }
+      if (lungPresScale < 0.999) {
+        broadFricSm[t]  *= lungPresScale;
+        glotFricSm[t]   *= lungPresScale;
+        burstSm[t]      *= lungPresScale;
+        labPopSm[t]     *= lungPresScale;
       }
 
       if (breathExcess > 0.05 && lowAir > 0.05) {
@@ -1289,7 +1282,7 @@ function buildScore(text, opts = {}) {
       }
     }
 
-    // 2) Natural mid-utterance inhale sound ("su...") during pauses after meaningful lung air usage
+    // 2) Natural mid-utterance inhale sound ("su...") strictly inside true pauses, ending 35ms before next consonant
     if (inhale > 0.01) {
       let lastSp = -1, firstSp = -1;
       for (let t = 0; t < n; t++) {
@@ -1307,19 +1300,20 @@ function buildScore(text, opts = {}) {
           const p1 = t;
           const pauDur = (p1 - p0) * fpz;
           const airBefore = p0 > 0 ? airTr[p0 - 1] : 1.0;
-          if (pauDur >= 0.11 && airBefore < 0.91) {
+          if (pauDur >= 0.13 && airBefore < 0.91) {
             const depth = Math.min(1.0, (0.91 - airBefore) / 0.55);
-            const inhDur = Math.min(0.145, pauDur * 0.62);
+            const inhDur = Math.min(0.135, (pauDur - 0.045) * 0.72);
             const inhFrames = Math.max(4, Math.floor(inhDur / fpz));
-            const iEnd = Math.max(p0 + 1, p1 - 2);
-            const iStart = Math.max(p0 + 1, iEnd - inhFrames);
-            const peakAmp = (0.042 + 0.175 * depth) * Math.min(2.0, inhale);
-            for (let k = iStart; k < iEnd; k++) {
-              const u = (k - iStart) / Math.max(1, iEnd - iStart - 1);
-              const env = Math.pow(Math.sin(Math.PI * u), 1.8);
-              glotFricSm[k] = Math.max(glotFricSm[k], peakAmp * env);
-              velSm[k] = Math.max(velSm[k], 0.14 * env);
-              fricJ_tr[k] = 2;
+            const iEnd = Math.max(p0 + 2, p1 - 7);
+            const iStart = Math.max(p0 + 2, iEnd - inhFrames);
+            if (iEnd > iStart + 2) {
+              const peakAmp = (0.036 + 0.145 * depth) * Math.min(2.0, inhale);
+              for (let k = iStart; k < iEnd; k++) {
+                const u = (k - iStart) / Math.max(1, iEnd - iStart - 1);
+                const env = Math.pow(Math.sin(Math.PI * u), 1.8);
+                glotFricSm[k] = Math.max(glotFricSm[k], peakAmp * env);
+                velSm[k] = Math.max(velSm[k], 0.14 * env);
+              }
             }
           }
         }
