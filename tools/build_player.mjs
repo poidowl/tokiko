@@ -10,6 +10,7 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.1";
+const PLAYER_REV = "v0.1.1a";
 const VERSION_NOTE = "4次ゼロリンギングLPF(24dB/oct)で高域折り返し低減・buildScore O(N)化（Train Worst 28.9% / uncanny 35.8）";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
@@ -231,6 +232,29 @@ const playerHtml = `<!DOCTYPE html>
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
   }
+  .autoplay-pill {
+    position: absolute;
+    left: 50%;
+    bottom: 9px;
+    transform: translateX(-50%);
+    background: rgba(232, 93, 63, 0.92);
+    color: #fffaf5;
+    border: 1px solid rgba(255, 250, 245, 0.25);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    animation: tokikoPulse 1.8s ease-in-out infinite;
+  }
+  .autoplay-pill[hidden] { display: none; }
+  @keyframes tokikoPulse {
+    0%, 100% { transform: translateX(-50%) scale(1); opacity: 0.95; }
+    50% { transform: translateX(-50%) scale(1.04); opacity: 1; }
+  }
 
   .controls-bar {
     display: flex;
@@ -386,6 +410,7 @@ const playerHtml = `<!DOCTYPE html>
       <span id="tractHud">声道管 M=31+23+10+3</span>
       <span id="waveHud">波形 / FFT 0–6kHz</span>
     </div>
+    <div id="autoPill" class="autoplay-pill" hidden>🔊 タップでしゃべる</div>
   </div>
 
   <div class="controls-bar">
@@ -402,15 +427,15 @@ const playerHtml = `<!DOCTYPE html>
   <div class="knobs">
     <label class="knob">
       <div class="knob-head"><span>高さ</span><strong id="hzVal">296Hz</strong></div>
-      <input id="slHz" type="range" min="220" max="360" step="2" value="296">
+      <input id="slHz" type="range" min="140" max="440" step="2" value="296">
     </label>
     <label class="knob">
-      <div class="knob-head"><span>笑顔度</span><strong id="smileVal">0.54</strong></div>
-      <input id="slSmile" type="range" min="0.00" max="0.85" step="0.02" value="0.54">
+      <div class="knob-head"><span>息もれ</span><strong id="breathVal">30%</strong></div>
+      <input id="slBreath" type="range" min="0" max="100" step="1" value="30" aria-label="息もれ（0%張り声〜100%ウィスパー）">
     </label>
     <label class="knob">
       <div class="knob-head"><span>話速</span><strong id="rateVal">1.00x</strong></div>
-      <input id="slRate" type="range" min="0.78" max="1.28" step="0.02" value="1.00">
+      <input id="slRate" type="range" min="-1.00" max="1.00" step="0.01" value="0.00" aria-label="話速（左0.5倍〜右2.0倍）">
     </label>
   </div>
 
@@ -434,16 +459,19 @@ const elPlay = document.getElementById("playBtn");
 const elScope = document.getElementById("scope");
 const elTractHud = document.getElementById("tractHud");
 const elWaveHud = document.getElementById("waveHud");
+const elAutoPill = document.getElementById("autoPill");
 const elSynthStat = document.getElementById("synthStat");
 const elSeed = document.getElementById("seedBtn");
 const slHz = document.getElementById("slHz");
-const slSmile = document.getElementById("slSmile");
+const slBreath = document.getElementById("slBreath");
 const slRate = document.getElementById("slRate");
 const hzVal = document.getElementById("hzVal");
-const smileVal = document.getElementById("smileVal");
+const breathVal = document.getElementById("breathVal");
 const rateVal = document.getElementById("rateVal");
 const sampleBtns = Array.from(document.querySelectorAll(".sample-btn"));
 const presetBtns = Array.from(document.querySelectorAll(".preset-btn"));
+
+const BREATH_PRESET_PCT = { kawaii: 30, amae: 42, genki: 26 };
 
 let curPreset = "kawaii";
 let curSeed = 2024;
@@ -456,22 +484,63 @@ let playStartAt = 0;
 let playDur = 0;
 let cachedKey = "";
 let cached = null; // { res, sc, synthMs, trimStartSec, trimDurSec }
+let autoPlayDone = false;
+let awaitingUnlock = false;
+
+function getSpeed() {
+  return Math.pow(2, Number(slRate.value));
+}
+
+function getDurationRate() {
+  const sp = getSpeed();
+  const p = KUDA_PRESETS[curPreset];
+  if (p && Math.abs(sp - (1.0 / p.rate)) < 0.012) return p.rate;
+  return 1.0 / sp;
+}
+
+function getBreathOpts(pct) {
+  const p = KUDA_PRESETS[curPreset] || KUDA_PRESETS.kawaii;
+  const defPct = BREATH_PRESET_PCT[curPreset] ?? 30;
+  if (Math.round(pct) === defPct) {
+    return { rd_base: p.rd_base, rd_tail: p.rd_tail, asp: p.asp, aspMid: p.aspMid };
+  }
+  const t = Math.max(0, Math.min(1, pct / 100));
+  if (t <= 0.30) {
+    const u = t / 0.30;
+    return {
+      rd_base: 0.80 + (1.40 - 0.80) * u,
+      rd_tail: 1.25 + (2.14 - 1.25) * u,
+      asp:     0.005 + (0.044 - 0.005) * u,
+      aspMid:  0.020 + (0.178 - 0.020) * u,
+      bernS:   4.60 + (3.58 - 4.60) * u,
+    };
+  }
+  const u = (t - 0.30) / 0.70;
+  const curve = 0.4 * u + 0.6 * u * u;
+  return {
+    rd_base: 1.40 + (2.90 - 1.40) * u,
+    rd_tail: 2.14 + (3.60 - 2.14) * u,
+    asp:     0.044 + (0.280 - 0.044) * curve,
+    aspMid:  0.178 + (1.050 - 0.178) * curve,
+    bernS:   3.58 + (2.00 - 3.58) * u,
+  };
+}
 
 function getOpts() {
-  return {
+  const breath = getBreathOpts(Number(slBreath.value));
+  return Object.assign({
     preset: curPreset,
     hz: Number(slHz.value),
-    smile: Number(slSmile.value),
-    rate: Number(slRate.value),
+    rate: getDurationRate(),
     seed: curSeed,
     srOut: 24000,
-  };
+  }, breath);
 }
 
 function updateKnobText() {
   hzVal.textContent = Math.round(Number(slHz.value)) + "Hz";
-  smileVal.textContent = Number(slSmile.value).toFixed(2);
-  rateVal.textContent = Number(slRate.value).toFixed(2) + "x";
+  breathVal.textContent = Math.round(Number(slBreath.value)) + "%";
+  rateVal.textContent = getSpeed().toFixed(2) + "x";
 }
 
 function synthesizeIfNeeded() {
@@ -511,7 +580,33 @@ function synthesizeIfNeeded() {
   return cached;
 }
 
+function ensureAudio() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!audioCtx) {
+    audioCtx = new Ctx();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.65;
+    analyser.connect(audioCtx.destination);
+  }
+  return audioCtx;
+}
+
+function hideAutoPrompt() {
+  awaitingUnlock = false;
+  if (elAutoPill) elAutoPill.hidden = true;
+}
+
+function showAutoPrompt() {
+  if (autoPlayDone) return;
+  awaitingUnlock = true;
+  if (elAutoPill) elAutoPill.hidden = false;
+}
+
 function stopPlay() {
+  autoPlayDone = true;
+  hideAutoPrompt();
   if (curSource) {
     try { curSource.stop(); } catch (_) {}
     try { curSource.disconnect(); } catch (_) {}
@@ -526,25 +621,23 @@ function stopPlay() {
 function startPlay() {
   stopPlay();
   const data = synthesizeIfNeeded();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return;
-  if (!audioCtx) {
-    audioCtx = new Ctx();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.65;
-    analyser.connect(audioCtx.destination);
-  }
-  if (audioCtx.state === "suspended") audioCtx.resume();
+  const ctx = ensureAudio();
+  if (!ctx) return;
 
-  const buf = audioCtx.createBuffer(1, data.trimmed.length, data.res.sr);
+  const buf = ctx.createBuffer(1, data.trimmed.length, data.res.sr);
   buf.getChannelData(0).set(data.trimmed);
-  const src = audioCtx.createBufferSource();
+  const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(analyser);
   curSource = src;
-  playStartAt = audioCtx.currentTime;
+  playStartAt = ctx.currentTime;
   playDur = buf.duration;
+
+  if (ctx.state === "suspended") {
+    ctx.resume().then(() => {
+      if (curSource === src) playStartAt = ctx.currentTime;
+    }).catch(() => {});
+  }
 
   elPlay.classList.add("playing");
   elPlay.textContent = "■ 停止";
@@ -562,7 +655,7 @@ function startPlay() {
 
   const tick = () => {
     if (!curSource) return;
-    const elapsed = audioCtx.currentTime - playStartAt;
+    const elapsed = ctx.currentTime - playStartAt;
     const prog = Math.max(0, Math.min(1, elapsed / Math.max(0.01, playDur)));
     drawScope(prog);
     if (prog < 1) rafId = requestAnimationFrame(tick);
@@ -798,15 +891,16 @@ presetBtns.forEach((btn) => {
     const p = KUDA_PRESETS[curPreset];
     if (p) {
       slHz.value = String(Math.round(p.hz));
-      slSmile.value = p.smile.toFixed(2);
-      slRate.value = p.rate.toFixed(2);
+      slBreath.value = String(BREATH_PRESET_PCT[curPreset] ?? 30);
+      const logSp = Math.max(-1, Math.min(1, Math.log2(1.0 / p.rate)));
+      slRate.value = logSp.toFixed(2);
       updateKnobText();
     }
     startPlay();
   });
 });
 
-for (const sl of [slHz, slSmile, slRate]) {
+for (const sl of [slHz, slBreath, slRate]) {
   sl.addEventListener("input", updateKnobText);
   sl.addEventListener("change", () => startPlay());
 }
@@ -831,14 +925,56 @@ window.addEventListener("message", (ev) => {
 
 window.addEventListener("resize", () => drawScope(-1));
 
-// Boot: pre-synthesize default phrase once so vocal tract & waveform render immediately
+// Fallback unlock: if browser autoplay policy holds AudioContext suspended, speak on first tap anywhere
+const onFirstGesture = (ev) => {
+  if (!awaitingUnlock || autoPlayDone) return;
+  const t = ev.target;
+  const isInteractive = t && t.closest && t.closest("button, input, a, label, #scope");
+  if (isInteractive) {
+    autoPlayDone = true;
+    hideAutoPrompt();
+    return;
+  }
+  startPlay();
+};
+window.addEventListener("pointerdown", onFirstGesture, { capture: true });
+window.addEventListener("keydown", onFirstGesture, { capture: true });
+
+// Boot: immediately synthesize & attempt auto-speak on open (with clean autoplay-policy fallback)
 updateKnobText();
-requestAnimationFrame(() => {
+(() => {
+  const params = new URLSearchParams(window.location.search || "");
+  const wantAuto = params.get("autoplay") !== "0";
+  const ctx = wantAuto ? ensureAudio() : null;
+  const resumeP = (ctx && ctx.state === "suspended")
+    ? ctx.resume().catch(() => {})
+    : Promise.resolve();
+
+  synthesizeIfNeeded();
+  drawScope(-1);
+
+  if (!wantAuto || !ctx) return;
+
+  const launchIfReady = () => {
+    if (!autoPlayDone && ctx.state === "running") {
+      startPlay();
+      return true;
+    }
+    return false;
+  };
+
+  if (launchIfReady()) return;
+
+  ctx.addEventListener("statechange", () => {
+    launchIfReady();
+  });
+  resumeP.then(() => {
+    if (!launchIfReady() && !autoPlayDone) showAutoPrompt();
+  });
   setTimeout(() => {
-    synthesizeIfNeeded();
-    drawScope(-1);
-  }, 16);
-});
+    if (!autoPlayDone && !launchIfReady()) showAutoPrompt();
+  }, 180);
+})();
 })();
 </script>
 </body>
@@ -850,17 +986,17 @@ const shareHtml = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="tokiko (KUDA ${VERSION}) — 61KB・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
+<meta name="description" content="tokiko (KUDA ${VERSION}) — ${ENGINE_KB}KB・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
 <meta name="twitter:card" content="player">
-<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — 61KB・重み0Bの仮想発声器官（純JS）">
+<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
 <meta name="twitter:description" content="録音0Byte・学習モデルなし。4分岐ケリー・ロックバウム声道導波管（口31+鼻23+副鼻腔10+梨状窩3）だけで日本語を喋る純JS仮想発声器官。カード上でそのまま声道を動かして聴けます。">
 <meta name="twitter:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
-<meta name="twitter:player" content="${PAGES_BASE}/player.html?v=${VERSION}">
+<meta name="twitter:player" content="${PAGES_BASE}/player.html?v=${PLAYER_REV}">
 <meta name="twitter:player:width" content="480">
 <meta name="twitter:player:height" content="480">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${PAGES_BASE}/">
-<meta property="og:title" content="tokiko / KUDA ${VERSION} — 61KB・重み0Bの仮想発声器官（純JS）">
+<meta property="og:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
 <meta property="og:description" content="録音0Byte・学習モデルなし。4分岐声道導波管だけで日本語を喋る純JS仮想発声器官。">
 <meta property="og:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
 <meta property="og:image:width" content="1024">
@@ -966,7 +1102,8 @@ const shareHtml = `<!DOCTYPE html>
 <body>
 <main class="wrap">
   <div class="frame-shell">
-    <iframe id="playerFrame" src="./player.html?v=${VERSION}" title="tokiko / KUDA ${VERSION} 正方形ライブプレイヤー"
+    <iframe id="playerFrame" src="./player.html?v=${PLAYER_REV}" title="tokiko / KUDA ${VERSION} 正方形ライブプレイヤー"
+      allow="autoplay"
       sandbox="allow-popups allow-same-origin allow-scripts allow-presentation"></iframe>
   </div>
 
