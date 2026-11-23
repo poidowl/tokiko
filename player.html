@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="robots" content="noindex">
 <link rel="canonical" href="https://poidowl.github.io/tokiko/">
-<title>tokiko / KUDA v0.1.2 — 仮想発声器官 プレイヤー</title>
+<title>tokiko / KUDA v0.1.3-turbo — 仮想発声器官 プレイヤー</title>
 <style>
   :root {
     --bg: #0c0f12;
@@ -352,7 +352,7 @@
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
     <div class="meta-right">
-      <span class="stat-chip">68KB · 0B</span>
+      <span class="stat-chip">76KB · 0B</span>
       <a class="gh-link" href="https://github.com/poidowl/tokiko" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
     </div>
   </div>
@@ -406,10 +406,10 @@
 
   <footer class="ver-foot">
     <div class="ver-top">
-      <div><span class="ver-badge">v0.1.2</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
+      <div><span class="ver-badge">v0.1.3-turbo</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
       <span id="synthStat">待機中 · 24kHz</span>
     </div>
-    <div class="ver-note" title="ローマ字・英字入力対応 (konnichiwa / JavaScript等) ＋ 開けた瞬間自動発話 ＋ 息もれ/倍速(0.5x–2.0x)スライダ">変更: ローマ字・英字入力対応 (konnichiwa / JavaScript等) ＋ 開けた瞬間自動発話 ＋ 息もれ/倍速(0.5x–2.0x)スライダ</div>
+    <div class="ver-note" title="4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）">変更: 4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）</div>
   </footer>
 </div>
 
@@ -1553,6 +1553,389 @@ function applyAntiAliasLpf(buf, srIn, cutoffHz) {
   }
   return src;
 }
+function runKudaWaveguide(sc, rawOut, seed, asp, aspMid, bernS) {
+  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr } = sc;
+  const N = rawOut.length;
+  let rngA = (Math.trunc(seed) ^ 0x6d2b79f5) >>> 0;
+  const rngRand = () => {
+    rngA = (rngA + 0x6d2b79f5) | 0;
+    let t = Math.imul(rngA ^ (rngA >>> 15), 1 | rngA);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296.0;
+  };
+  let R = new Float64Array(M), L = new Float64Array(M);
+  let Rn = new Float64Array(M), Ln = new Float64Array(M);
+  let nR = new Float64Array(MN), nL = new Float64Array(MN);
+  let nRn = new Float64Array(MN), nLn = new Float64Array(MN);
+  const PIR_LEN = 2 * MP - 1;
+  const pirBuf = new Float64Array(PIR_LEN);
+  const PIR_GAIN = Math.pow(0.95, PIR_LEN) * 0.85;
+  let pirPtr = 0;
+  const SIN_LEN = 2 * MS - 1;
+  const sinBuf = new Float64Array(SIN_LEN);
+  const SIN_GAIN = Math.pow(0.992, SIN_LEN) * 0.90;
+  let sinPtr = 0;
+  const nA = new Float64Array(MN);
+  for (let q = 0; q < MN; q++) nA[q] = q < 4 ? 1.3 : q < 11 ? 2.4 : q < 17 ? 1.8 : 0.55;
+  const nK = new Float64Array(MN - 1);
+  for (let q = 0; q < MN - 1; q++) nK[q] = (nA[q] - nA[q + 1]) / (nA[q] + nA[q + 1]);
+  const nExitGain = Math.sqrt(nA[MN - 1] / 3.0) * 1.15;
+  const wgSR = 2 * SR;
+  const k_tr = Array.from({ length: n }, () => new Float64Array(M - 1));
+  const apTanh = new Float64Array(n);
+  const aR_fr = new Float64Array(n);
+  const lipGain_fr = new Float64Array(n);
+  for (let t = 0; t < n; t++) {
+    const At = A_tr[t];
+    for (let j = 0; j < M - 1; j++) k_tr[t][j] = (At[j] - At[j + 1]) / (At[j] + At[j + 1]);
+    apTanh[t] = 0.08 * Math.tanh((At[24] - 2.4) * 0.5);
+    const lipArea = At[M - 1] > 0.015 ? At[M - 1] : 0.015;
+    const aLip = Math.sqrt(lipArea / Math.PI);
+    aR_fr[t] = Math.exp(-2.0 * Math.PI * Math.min(18000.0, 4100.0 / (aLip > 0.24 ? aLip : 0.24)) / wgSR);
+    lipGain_fr[t] = Math.sqrt(lipArea / 3.0);
+  }
+  const kSharp = new Uint8Array(n);
+  for (let t = 0; t < n - 1; t++) {
+    const kt0 = k_tr[t], kt1 = k_tr[t + 1];
+    let sharp = Math.abs(A_tr[t + 1][M - 1] - A_tr[t][M - 1]) > 0.15;
+    if (!sharp) {
+      for (let j = 0; j < M - 1; j++) {
+        if (Math.abs(kt1[j] - kt0[j]) > 0.08) { sharp = true; break; }
+      }
+    }
+    if (sharp) kSharp[t] = 1;
+  }
+  const LUT_N = 1024;
+  const lutOpen = new Float64Array(LUT_N + 2);
+  const lutClose = new Float64Array(LUT_N + 2);
+  const lutChink = new Float64Array(LUT_N + 2);
+  for (let q = 0; q <= LUT_N; q++) {
+    const x = q / LUT_N;
+    lutOpen[q] = 0.5 * (1.0 - Math.cos(Math.PI * x));
+    lutClose[q] = 1.0 - Math.pow(x, bernS);
+    lutChink[q] = Math.sin(Math.PI * x);
+  }
+  lutOpen[LUT_N + 1] = lutOpen[LUT_N];
+  lutClose[LUT_N + 1] = lutClose[LUT_N];
+  lutChink[LUT_N + 1] = lutChink[LUT_N];
+  const k = new Float64Array(M - 1);
+  const dk = new Float64Array(M - 1);
+  let ph = 0.0, lpRet1 = 0.0, lpRet2 = 0.0;
+  let cycJit = 0.0, cycShim = 0.0, cycMuc = 0.0, cycTp = 0.0;
+  let radLipState = 0.0, radNosState = 0.0, viscLp1 = 0.0, viscLp2 = 0.0;
+  let hp1 = 0.0, hp2 = 0.0, lpA1 = 0.0, lpA2 = 0.0, wPrev = 0.0, hp1Prev = 0.0;
+  let mHp = 0.0, mWPrev = 0.0, mLp1 = 0.0, mLp2 = 0.0, mLp3 = 0.0;
+  let pOral = 0.0;
+  let sH1 = 0.0, sH2 = 0.0, sH3 = 0.0, sW0 = 0.0, sW1 = 0.0, sW2 = 0.0, sL1 = 0.0, sL2 = 0.0;
+  let pH1 = 0.0, pH2 = 0.0, pH3 = 0.0, pW0 = 0.0, pW1 = 0.0, pW2 = 0.0, pL1 = 0.0, pL2 = 0.0;
+  let bHp = 0.0, bWPrev = 0.0, bLp1 = 0.0, bLp2 = 0.0;
+  let wallLp1 = 0.0, wallLp2 = 0.0;
+  let nasalWake = 0, alvWake = 0, palWake = 0, brdWake = 0, glotWake = 0, wallWake = 0;
+  const wallLoss = 0.9980;
+  const cheekLoss = 0.9970;
+  const epiLoss = 0.9982;
+  const nasalLoss = 0.9920;
+  const frameStepSamples = fpz * SR;
+  const invFrameStep = 1.0 / frameStepSamples;
+  const aNos = Math.exp(-2.0 * Math.PI * 5600.0 / wgSR);
+  const oneMinusANos = 1.0 - aNos;
+  const acSinus = 0.18;
+  const ta2 = 0.0049;
+  let dcX = 0.0, dcY = 0.0;
+  let ax0 = 0.0, ay0 = 0.0, ax1 = 0.0, ay1 = 0.0, ax2 = 0.0, ay2 = 0.0;
+  const c0 = Math.cos(2 * Math.PI * 5.1 / SR), s0 = Math.sin(2 * Math.PI * 5.1 / SR);
+  const c1 = Math.cos(2 * Math.PI * 7.3 / SR), s1 = Math.sin(2 * Math.PI * 7.3 / SR);
+  const c2 = Math.cos(2 * Math.PI * 9.7 / SR), s2 = Math.sin(2 * Math.PI * 9.7 / SR);
+  let ox0 = Math.cos(0.3), oy0 = Math.sin(0.3);
+  let ox1 = Math.cos(1.8), oy1 = Math.sin(1.8);
+  let ox2 = Math.cos(3.1), oy2 = Math.sin(3.1);
+  let lastTa1PT = -1.0, lastTa2PT = -1.0, aTa1 = 0.9, aTa2 = 0.7;
+  let prevF0Idx = -1;
+  for (let i = 0; i < N; i++) {
+    const fPos = i * invFrameStep;
+    const f0Idx = fPos < n - 1 ? (fPos | 0) : (n - 1);
+    const f1Idx = f0Idx < n - 1 ? f0Idx + 1 : f0Idx;
+    const frac = fPos - f0Idx;
+    const A0 = A_tr[f0Idx], A1 = A_tr[f1Idx];
+    const sharp = kSharp[f0Idx] !== 0;
+    let aR, lipGain;
+    if (sharp) {
+      let aPrev = A0[0] + (A1[0] - A0[0]) * frac;
+      for (let j = 0; j < M - 1; j++) {
+        const aNext = A0[j + 1] + (A1[j + 1] - A0[j + 1]) * frac;
+        k[j] = (aPrev - aNext) / (aPrev + aNext);
+        aPrev = aNext;
+      }
+      const lipArea = aPrev > 0.015 ? aPrev : 0.015;
+      const aLip = Math.sqrt(lipArea / Math.PI);
+      aR = Math.exp(-2.0 * Math.PI * Math.min(18000.0, 4100.0 / (aLip > 0.24 ? aLip : 0.24)) / wgSR);
+      lipGain = Math.sqrt(lipArea / 3.0);
+      prevF0Idx = -1;
+    } else {
+      if (f0Idx !== prevF0Idx) {
+        const k0 = k_tr[f0Idx], k1 = k_tr[f1Idx];
+        for (let j = 0; j < M - 1; j++) {
+          const d = k1[j] - k0[j];
+          k[j] = k0[j] + d * frac;
+          dk[j] = d * invFrameStep;
+        }
+        prevF0Idx = f0Idx;
+      } else {
+        for (let j = 0; j < M - 1; j++) k[j] += dk[j];
+      }
+      aR = aR_fr[f0Idx] + (aR_fr[f1Idx] - aR_fr[f0Idx]) * frac;
+      lipGain = lipGain_fr[f0Idx] + (lipGain_fr[f1Idx] - lipGain_fr[f0Idx]) * frac;
+    }
+    const oneMinusAR = 1.0 - aR;
+    const Apir0 = A0[PIR_J] + (A1[PIR_J] - A0[PIR_J]) * frac;
+    const Apir1 = A0[PIR_J + 1] + (A1[PIR_J + 1] - A0[PIR_J + 1]) * frac;
+    const invPir = 2.0 / (Apir0 + Apir1 + 0.25);
+    const Avel0 = A0[VEL_J] + (A1[VEL_J] - A0[VEL_J]) * frac;
+    const Avel1 = A0[VEL_J + 1] + (A1[VEL_J + 1] - A0[VEL_J + 1]) * frac;
+    const Asin0 = A0[SIN_J] + (A1[SIN_J] - A0[SIN_J]) * frac;
+    const Asin1 = A0[SIN_J + 1] + (A1[SIN_J + 1] - A0[SIN_J + 1]) * frac;
+    const invSin = 2.0 / (Asin0 + Asin1 + acSinus);
+    const f0 = f0_fr[f0Idx] + (f0_fr[f1Idx] - f0_fr[f0Idx]) * frac;
+    const vo = voSm[f0Idx] + (voSm[f1Idx] - voSm[f0Idx]) * frac;
+    const rd = rdSm[f0Idx] + (rdSm[f1Idx] - rdSm[f0Idx]) * frac;
+    const chinkAmp = chinkSm[f0Idx] + (chinkSm[f1Idx] - chinkSm[f0Idx]) * frac;
+    const pLung = pLungSm[f0Idx] + (pLungSm[f1Idx] - pLungSm[f0Idx]) * frac;
+    const velA = velSm[f0Idx] + (velSm[f1Idx] - velSm[f0Idx]) * frac;
+    const sibAlvF = sibAlvFricSm[f0Idx] + (sibAlvFricSm[f1Idx] - sibAlvFricSm[f0Idx]) * frac;
+    const sibPalF = sibPalFricSm[f0Idx] + (sibPalFricSm[f1Idx] - sibPalFricSm[f0Idx]) * frac;
+    const broadF  = broadFricSm[f0Idx] + (broadFricSm[f1Idx] - broadFricSm[f0Idx]) * frac;
+    const glotF   = glotFricSm[f0Idx] + (glotFricSm[f1Idx] - glotFricSm[f0Idx]) * frac;
+    const burst   = burstSm[f0Idx] + (burstSm[f1Idx] - burstSm[f0Idx]) * frac;
+    const labPop  = labPopSm[f0Idx] + (labPopSm[f1Idx] - labPopSm[f0Idx]) * frac;
+    const stopW   = stopSm[f0Idx] + (stopSm[f1Idx] - stopSm[f0Idx]) * frac;
+    const sigh    = sighSm[f0Idx] + (sighSm[f1Idx] - sighSm[f0Idx]) * frac;
+    const fJ      = fricJ_tr[f0Idx];
+    pOral = pOral * (1.0 - 0.008 * stopW - 0.025 * (1.0 - stopW)) + 0.008 * stopW * (pLung < 1.0 ? pLung : 1.0);
+    const burstDrive = burst * 0.48 + (1.0 - stopW) * pOral * 0.06;
+    const oq = Math.max(0.66, Math.min(0.86, 0.49 + 0.16 * rd));
+    const rkp = Math.max(0.32, Math.min(0.55, (22.0 + 13.0 * rd) * 0.01));
+    const tp = Math.max(0.28, Math.min(oq - 0.08, (oq / (1.0 + rkp)) * (1.0 + 0.10 * cycTp)));
+    const te = oq;
+    const invTp = LUT_N / tp, invTe = LUT_N / te, invTeTp = LUT_N / Math.max(1e-6, te - tp);
+    const ta1 = Math.max(0.0090, Math.min(0.046, (0.0096 + 0.0092 * Math.max(0, rd - 1.1) + 0.022 * sigh) * (1.0 + 0.34 * cycMuc)));
+    const velGate = velA > 0.12 ? 1.0 : velA / 0.12;
+    if (velGate > 0.0) nasalWake = 1000;
+    const doNasal = nasalWake > 0;
+    const AcVel = velA > 0.0 ? velA : 0.0;
+    const invVel = doNasal ? 2.0 / (Avel0 + Avel1 + AcVel) : 0.0;
+    if (sibAlvF > 0.0 || (fJ === 27 && burstDrive > 0.0)) alvWake = 120;
+    if (sibPalF > 0.0 || (fJ === 27 && burstDrive > 0.0)) palWake = 120;
+    if (broadF > 0.0 || burstDrive > 0.0 || labPop > 0.0) brdWake = 160;
+    if (vo * pLung > 0.0 || glotF > 0.0) glotWake = 160;
+    if (stopW > 0.0) wallWake = 400;
+    const doAlv = alvWake > 0; if (doAlv) alvWake--;
+    const doPal = palWake > 0; if (doPal) palWake--;
+    const doBrd = brdWake > 0; if (doBrd) brdWake--;
+    const doGlot = glotWake > 0; if (doGlot) glotWake--;
+    const doWall = wallWake > 0; if (doWall) wallWake--;
+    const fwdFrac = (sibAlvF + sibPalF) > 0.15 ? 0.95 : 0.72;
+    const breathMult = 1.0 + 2.1 * sigh + 0.34 * (rd > 1.45 ? rd - 1.45 : 0.0);
+    let periodTicks = wgSR / Math.max(70.0, f0 * (1.0 + 0.0148 * cycJit));
+    let invPT = 1.0 / periodTicks;
+    const ta1PT = ta1 * periodTicks, ta2PT = ta2 * periodTicks;
+    if (Math.abs(ta1PT - lastTa1PT) > 0.002 * lastTa1PT) { aTa1 = Math.exp(-1.0 / ta1PT); lastTa1PT = ta1PT; }
+    if (Math.abs(ta2PT - lastTa2PT) > 0.002 * lastTa2PT) { aTa2 = Math.exp(-1.0 / ta2PT); lastTa2PT = ta2PT; }
+    let sampleOut = 0.0;
+    for (let sub = 0; sub < 2; sub++) {
+      if (sub === 1) {
+        const pt2 = wgSR / Math.max(70.0, f0 * (1.0 + 0.0148 * cycJit));
+        if (pt2 !== periodTicks) {
+          periodTicks = pt2; invPT = 1.0 / periodTicks;
+          aTa1 = Math.exp(-1.0 / (ta1 * periodTicks)); lastTa1PT = ta1 * periodTicks;
+          aTa2 = Math.exp(-1.0 / (ta2 * periodTicks)); lastTa2PT = ta2 * periodTicks;
+        }
+      }
+      ph += invPT;
+      if (ph >= 1.0) {
+        ph -= 1.0;
+        const gRand = (rngRand() + rngRand() + rngRand() - 1.5) * 0.85;
+        const mRand = (rngRand() + rngRand() + rngRand() - 1.5) * 0.85;
+        const tRand = (rngRand() + rngRand() + rngRand() - 1.5) * 0.85;
+        cycJit = 0.40 * cycJit + 0.91 * gRand;
+        cycMuc = 0.30 * cycMuc + 0.95 * mRand;
+        cycTp  = 0.30 * cycTp  + 0.95 * tRand;
+        cycShim = 0.46 * cycShim + 0.88 * (rngRand() - 0.5) * 0.068;
+      }
+      let gp = 0.0;
+      if (ph < te) {
+        let bern;
+        if (ph < tp) {
+          const p = ph * invTp;
+          const idx = p | 0;
+          bern = lutOpen[idx] + (lutOpen[idx + 1] - lutOpen[idx]) * (p - idx);
+        } else {
+          const p = (ph - tp) * invTeTp;
+          const idx = p | 0;
+          bern = lutClose[idx] + (lutClose[idx + 1] - lutClose[idx]) * (p - idx);
+        }
+        const pc = ph * invTe;
+        const idxC = pc | 0;
+        gp = bern + chinkAmp * (lutChink[idxC] + (lutChink[idxC + 1] - lutChink[idxC]) * (pc - idxC));
+      }
+      lpRet1 = (1.0 - aTa1) * gp + aTa1 * lpRet1;
+      lpRet2 = (1.0 - aTa2) * lpRet1 + aTa2 * lpRet2;
+      const xL = L[0] * 1.3;
+      const pLoad = xL > 2.5 ? 1.0 : (xL < -2.5 ? -1.0 : xL * (27.0 + xL * xL) / (27.0 + 9.0 * xL * xL));
+      const uGlot = vo * pLung * (1.0 + cycShim) * lpRet2 * (1.0 - 0.08 * pLoad);
+      const w = -1.0 + 2.0 * rngRand();
+      const wm = -1.0 + 2.0 * rngRand();
+      const tw = -1.0 + 2.0 * rngRand();
+      let glotJet = 0.0;
+      if (doGlot) {
+        const h1 = 0.72 * (hp1 + w - wPrev); wPrev = w; hp1 = h1;
+        const h2 = 0.72 * (hp2 + h1 - hp1Prev); hp1Prev = h1; hp2 = h2;
+        lpA1 = 0.14 * h2 + 0.86 * lpA1;
+        lpA2 = 0.14 * lpA1 + 0.86 * lpA2;
+        const mh = 0.92 * (mHp + wm - mWPrev); mWPrev = wm; mHp = mh;
+        mLp1 = 0.14 * mh + 0.86 * mLp1;
+        mLp2 = 0.14 * mLp1 + 0.86 * mLp2;
+        mLp3 = 0.14 * mLp2 + 0.86 * mLp3;
+        const openMod = 0.26 + 0.74 * (lpRet2 < 1.4 ? lpRet2 : 1.4);
+        const glotH = (1.0 - vo) * glotF * 1.50 * (0.72 * mLp3 + 0.28 * lpA2);
+        glotJet = vo * pLung * openMod * breathMult * (asp * lpA2 * 0.44 + aspMid * mLp3 * 0.78) + glotH;
+      }
+      const rg = 0.920 - 0.130 * vo * (lpRet2 < 1.2 ? lpRet2 : 1.2);
+      Rn[0] = (uGlot + glotJet) + rg * L[0];
+      if (doAlv) {
+        const sy1 = 0.67 * (sH1 + tw - sW0); sW0 = tw; sH1 = sy1;
+        const sy2 = 0.67 * (sH2 + sy1 - sW1); sW1 = sy1; sH2 = sy2;
+        const sy3 = 0.67 * (sH3 + sy2 - sW2); sW2 = sy2; sH3 = sy3;
+        sL1 = 0.26 * sy3 + 0.74 * sL1;
+        sL2 = 0.26 * sL1 + 0.74 * sL2;
+      }
+      if (doPal) {
+        const py1 = 0.75 * (pH1 + tw - pW0); pW0 = tw; pH1 = py1;
+        const py2 = 0.75 * (pH2 + py1 - pW1); pW1 = py1; pH2 = py2;
+        const py3 = 0.75 * (pH3 + py2 - pW2); pW2 = py2; pH3 = py3;
+        pL1 = 0.20 * py3 + 0.80 * pL1;
+        pL2 = 0.20 * pL1 + 0.80 * pL2;
+      }
+      if (doBrd) {
+        const bh = 0.94 * (bHp + tw - bWPrev); bWPrev = tw; bHp = bh;
+        bLp1 = 0.11 * bh + 0.89 * bLp1;
+        bLp2 = 0.15 * bLp1 + 0.85 * bLp2;
+      }
+      let turbDipole = 0.0;
+      if (fJ > 4 && (doAlv || doPal || doBrd)) {
+        const sibDip = 0.50 * (sibAlvF * (sL2 * 1.22) + sibPalF * (pL2 * 1.28));
+        const burstNoise = (fJ === 27) ? (bLp2 * 0.88 + pL2 * 0.24 + sL2 * 0.14) : (bLp2 * 1.22);
+        const brdDip = 0.50 * (broadF * (bLp2 * 1.85) + burstDrive * burstNoise);
+        turbDipole = sibDip + brdDip;
+      }
+      for (let j = 0; j < PIR_J; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * epiLoss;
+        Ln[j] = (L[j + 1] + wS) * epiLoss;
+      }
+      {
+        const pa = R[PIR_J], pb = L[PIR_J + 1], pc = pirBuf[pirPtr];
+        const PJ = (Apir0 * pa + Apir1 * pb + 0.25 * pc) * invPir;
+        Ln[PIR_J] = (PJ - pa) * wallLoss;
+        Rn[PIR_J + 1] = (PJ - pb) * wallLoss;
+        pirBuf[pirPtr] = (PJ - pc) * PIR_GAIN;
+        if (++pirPtr === PIR_LEN) pirPtr = 0;
+      }
+      for (let j = PIR_J + 1; j < 10; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wallLoss;
+        Ln[j] = (L[j + 1] + wS) * wallLoss;
+      }
+      for (let j = 10; j < VEL_J; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * cheekLoss;
+        Ln[j] = (L[j + 1] + wS) * cheekLoss;
+      }
+      if (doNasal) {
+        const pa = R[VEL_J], pb = L[VEL_J + 1], pc = nL[0];
+        const PJ = (Avel0 * pa + Avel1 * pb + AcVel * pc) * invVel;
+        Ln[VEL_J] = (PJ - pa) * cheekLoss;
+        Rn[VEL_J + 1] = (PJ - pb) * cheekLoss;
+        nRn[0] = velGate * (PJ - pc) * nasalLoss;
+      } else {
+        const wS = k[VEL_J] * (R[VEL_J] - L[VEL_J + 1]);
+        Rn[VEL_J + 1] = (R[VEL_J] + wS) * cheekLoss;
+        Ln[VEL_J] = (L[VEL_J + 1] + wS) * cheekLoss;
+      }
+      {
+        const pa = R[SIN_J], pb = L[SIN_J + 1], pc = sinBuf[sinPtr];
+        const PJ = (Asin0 * pa + Asin1 * pb + acSinus * pc) * invSin;
+        Ln[SIN_J] = (PJ - pa) * cheekLoss;
+        Rn[SIN_J + 1] = (PJ - pb) * cheekLoss;
+        sinBuf[sinPtr] = (PJ - pc) * SIN_GAIN;
+        if (++sinPtr === SIN_LEN) sinPtr = 0;
+      }
+      for (let j = SIN_J + 1; j <= 24; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * cheekLoss;
+        Ln[j] = (L[j + 1] + wS) * cheekLoss;
+      }
+      for (let j = 25; j < M - 1; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wallLoss;
+        Ln[j] = (L[j + 1] + wS) * wallLoss;
+      }
+      if (turbDipole !== 0.0) {
+        Rn[fJ + 1] += fwdFrac * turbDipole;
+        Ln[fJ] -= (1.0 - fwdFrac) * turbDipole;
+      }
+      let pRadNos = 0.0;
+      if (doNasal) {
+        for (let q = 0; q < MN - 1; q++) {
+          const wn = nK[q] * (nR[q] - nL[q + 1]);
+          nRn[q + 1] = (nR[q] + wn) * nasalLoss;
+          nLn[q] = (nL[q + 1] + wn) * nasalLoss;
+        }
+        const nInc = nR[MN - 1];
+        radNosState = oneMinusANos * nInc + aNos * radNosState;
+        const nRefl = -0.988 * radNosState;
+        nLn[MN - 1] = nRefl;
+        pRadNos = (nInc + nRefl) * nExitGain;
+        const tNR = nR; nR = nRn; nRn = tNR;
+        const tNL = nL; nL = nLn; nLn = tNL;
+      }
+      const pInc = R[M - 1];
+      radLipState = oneMinusAR * pInc + aR * radLipState;
+      const pRefl = -0.992 * radLipState;
+      Ln[M - 1] = pRefl;
+      const pRadLip = (pInc + pRefl) * lipGain + labPop * bLp2 * 0.30;
+      let pWall = 0.0;
+      if (doWall) {
+        const pPhar = 0.5 * (R[5] + L[5]);
+        wallLp1 = 0.020 * pPhar + 0.980 * wallLp1;
+        wallLp2 = 0.020 * wallLp1 + 0.980 * wallLp2;
+        pWall = stopW * vo * wallLp2 * 0.048;
+      }
+      const tR = R; R = Rn; Rn = tR;
+      const tL = L; L = Ln; Ln = tL;
+      const pTot = pRadLip + pRadNos + pWall;
+      viscLp1 = 0.50 * pTot + 0.50 * viscLp1;
+      viscLp2 = 0.50 * viscLp1 + 0.50 * viscLp2;
+      sampleOut += 0.5 * viscLp2;
+    }
+    if (doNasal && --nasalWake === 0) {
+      nR.fill(0); nL.fill(0); nRn.fill(0); nLn.fill(0);
+      radNosState = 0.0;
+    }
+    const th = apTanh[f0Idx];
+    const yDc = sampleOut - dcX + 0.993 * dcY; dcX = sampleOut; dcY = yDc;
+    let ap0 = 0.46 + th + 0.25 * oy0; if (ap0 > 0.78) ap0 = 0.78; else if (ap0 < -0.78) ap0 = -0.78;
+    let ap1 = -0.40 + th + 0.22 * oy1; if (ap1 > 0.78) ap1 = 0.78; else if (ap1 < -0.78) ap1 = -0.78;
+    let ap2 = 0.28 + th + 0.18 * oy2; if (ap2 > 0.78) ap2 = 0.78; else if (ap2 < -0.78) ap2 = -0.78;
+    const y0 = ap0 * yDc + ax0 - ap0 * ay0; ax0 = yDc; ay0 = y0;
+    const y1 = ap1 * y0 + ax1 - ap1 * ay1; ax1 = y0; ay1 = y1;
+    const y2 = ap2 * y1 + ax2 - ap2 * ay2; ax2 = y1; ay2 = y2;
+    rawOut[i] = y2;
+    const nx0 = ox0 * c0 - oy0 * s0; oy0 = ox0 * s0 + oy0 * c0; ox0 = nx0;
+    const nx1 = ox1 * c1 - oy1 * s1; oy1 = ox1 * s1 + oy1 * c1; ox1 = nx1;
+    const nx2 = ox2 * c2 - oy2 * s2; oy2 = ox2 * s2 + oy2 * c2; ox2 = nx2;
+  }
+  return rngA;
+}
 function synthKuda(text, opts = {}) {
   const presetObj = KUDA_PRESETS[opts.preset || "kawaii"] || KUDA_PRESETS.kawaii;
   const merged = Object.assign({}, presetObj, opts);
@@ -1564,237 +1947,20 @@ function synthKuda(text, opts = {}) {
     srOut = 24000,
   } = merged;
   const sc = buildScore(text, merged);
-  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool } = sc;
+  const { n, fpz, voSm, fricSm, sighSm, voicedBool } = sc;
   const N = Math.max(1, Math.trunc(n * fpz * SR));
-  const rng = makeRng(seed);
-  const R = new Float64Array(M), L = new Float64Array(M);
-  const Rn = new Float64Array(M), Ln = new Float64Array(M);
-  const nR = new Float64Array(MN), nL = new Float64Array(MN);
-  const nRn = new Float64Array(MN), nLn = new Float64Array(MN);
-  const sR = new Float64Array(MS), sL = new Float64Array(MS);
-  const pR = new Float64Array(MP), pL = new Float64Array(MP);
-  const nA = new Float64Array(MN);
-  for (let q = 0; q < MN; q++) nA[q] = q < 4 ? 1.3 : q < 11 ? 2.4 : q < 17 ? 1.8 : 0.55;
-  const nK = new Float64Array(MN - 1);
-  for (let q = 0; q < MN - 1; q++) nK[q] = (nA[q] - nA[q + 1]) / (nA[q] + nA[q + 1]);
-  const A = new Float64Array(M);
-  const k = new Float64Array(M - 1);
   const rawOut = new Float32Array(N);
-  let ph = 0.0, lpRet1 = 0.0, lpRet2 = 0.0;
-  let cycJit = 0.0, cycShim = 0.0, cycMuc = 0.0, cycTp = 0.0;
-  let radLipState = 0.0, radNosState = 0.0, viscLp1 = 0.0, viscLp2 = 0.0;
-  let hp1 = 0.0, hp2 = 0.0, lpA1 = 0.0, lpA2 = 0.0, wPrev = 0.0, hp1Prev = 0.0;
-  let mHp = 0.0, mWPrev = 0.0, mLp1 = 0.0, mLp2 = 0.0, mLp3 = 0.0;
-  let pOral = 0.0;
-  let sH1 = 0.0, sH2 = 0.0, sH3 = 0.0, sW0 = 0.0, sW1 = 0.0, sW2 = 0.0, sL1 = 0.0, sL2 = 0.0;
-  let pH1 = 0.0, pH2 = 0.0, pH3 = 0.0, pW0 = 0.0, pW1 = 0.0, pW2 = 0.0, pL1 = 0.0, pL2 = 0.0;
-  let bHp = 0.0, bWPrev = 0.0, bLp1 = 0.0, bLp2 = 0.0;
-  let wallLp1 = 0.0, wallLp2 = 0.0;
-  let roomLp1 = 0.0, roomLp2 = 0.0;
-  const wallLoss = 0.9980;
-  const cheekLoss = 0.9970;
-  const epiLoss = 0.9982;
-  const nasalLoss = 0.9920;
-  const wgSR = 2 * SR;
-  const frameStepSamples = fpz * SR;
-  for (let i = 0; i < N; i++) {
-    const fPos = i / frameStepSamples;
-    const f0Idx = Math.min(n - 1, Math.floor(fPos));
-    const f1Idx = Math.min(n - 1, f0Idx + 1);
-    const frac = fPos - f0Idx;
-    const A0 = A_tr[f0Idx], A1 = A_tr[f1Idx];
-    for (let j = 0; j < M; j++) A[j] = A0[j] + (A1[j] - A0[j]) * frac;
-    for (let j = 0; j < M - 1; j++) k[j] = (A[j] - A[j + 1]) / (A[j] + A[j + 1]);
-    const f0 = f0_fr[f0Idx] + (f0_fr[f1Idx] - f0_fr[f0Idx]) * frac;
-    const vo = voSm[f0Idx] + (voSm[f1Idx] - voSm[f0Idx]) * frac;
-    const rd = rdSm[f0Idx] + (rdSm[f1Idx] - rdSm[f0Idx]) * frac;
-    const chinkAmp = chinkSm[f0Idx] + (chinkSm[f1Idx] - chinkSm[f0Idx]) * frac;
-    const pLung = pLungSm[f0Idx] + (pLungSm[f1Idx] - pLungSm[f0Idx]) * frac;
-    const velA = velSm[f0Idx] + (velSm[f1Idx] - velSm[f0Idx]) * frac;
-    const sibAlvF = sibAlvFricSm[f0Idx] + (sibAlvFricSm[f1Idx] - sibAlvFricSm[f0Idx]) * frac;
-    const sibPalF = sibPalFricSm[f0Idx] + (sibPalFricSm[f1Idx] - sibPalFricSm[f0Idx]) * frac;
-    const broadF  = broadFricSm[f0Idx] + (broadFricSm[f1Idx] - broadFricSm[f0Idx]) * frac;
-    const glotF   = glotFricSm[f0Idx] + (glotFricSm[f1Idx] - glotFricSm[f0Idx]) * frac;
-    const burst = burstSm[f0Idx] + (burstSm[f1Idx] - burstSm[f0Idx]) * frac;
-    const labPop = labPopSm[f0Idx] + (labPopSm[f1Idx] - labPopSm[f0Idx]) * frac;
-    const stopW = stopSm[f0Idx] + (stopSm[f1Idx] - stopSm[f0Idx]) * frac;
-    const sigh = sighSm[f0Idx] + (sighSm[f1Idx] - sighSm[f0Idx]) * frac;
-    const fJ = fricJ_tr[f0Idx];
-    pOral = pOral * (1.0 - 0.008 * stopW - 0.025 * (1.0 - stopW)) + 0.008 * stopW * Math.min(1.0, pLung);
-    const burstDrive = burst * 0.48 + (1.0 - stopW) * pOral * 0.06;
-    const oq = Math.max(0.66, Math.min(0.86, 0.49 + 0.16 * rd));
-    const rkp = Math.max(0.32, Math.min(0.55, (22.0 + 13.0 * rd) * 0.01));
-    const tp = Math.max(0.28, Math.min(oq - 0.08, (oq / (1.0 + rkp)) * (1.0 + 0.10 * cycTp)));
-    const te = oq;
-    const ta1 = Math.max(0.0090, Math.min(0.046, (0.0096 + 0.0092 * Math.max(0, rd - 1.1) + 0.022 * sigh) * (1.0 + 0.34 * cycMuc)));
-    const ta2 = 0.0049;
-    const lipArea = Math.max(0.015, A[M - 1]);
-    const aLip = Math.sqrt(lipArea / Math.PI);
-    const fRad = Math.min(18000.0, 4100.0 / Math.max(0.24, aLip));
-    const lipGain = Math.sqrt(lipArea / 3.0);
-    const aR = Math.exp(-2.0 * Math.PI * fRad / wgSR);
-    const aNos = Math.exp(-2.0 * Math.PI * 5600.0 / wgSR);
-    const acSinus = 0.18;
-    const velGate = Math.min(1.0, velA / 0.12);
-    let sampleOut = 0.0;
-    for (let sub = 0; sub < 2; sub++) {
-      const periodTicks = wgSR / Math.max(70.0, f0 * (1.0 + 0.0148 * cycJit));
-      ph += 1.0 / periodTicks;
-      if (ph >= 1.0) {
-        ph -= 1.0;
-        const gRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
-        const mRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
-        const tRand = (rng.random() + rng.random() + rng.random() - 1.5) * 0.85;
-        cycJit = 0.40 * cycJit + 0.91 * gRand;
-        cycMuc = 0.30 * cycMuc + 0.95 * mRand;
-        cycTp  = 0.30 * cycTp  + 0.95 * tRand;
-        cycShim = 0.46 * cycShim + 0.88 * (rng.random() - 0.5) * 0.068;
-      }
-      let gp = 0.0;
-      if (ph < te) {
-        let bern = 0.0;
-        if (ph < tp) {
-          bern = 0.5 * (1.0 - Math.cos(Math.PI * ph / tp));
-        } else {
-          const u = (ph - tp) / Math.max(1e-6, te - tp);
-          bern = 1.0 - Math.pow(u, bernS);
-        }
-        const chink = chinkAmp * Math.sin(Math.PI * ph / te);
-        gp = bern + chink;
-      }
-      const aTa1 = Math.exp(-1.0 / (ta1 * periodTicks));
-      const aTa2 = Math.exp(-1.0 / (ta2 * periodTicks));
-      lpRet1 = (1.0 - aTa1) * gp + aTa1 * lpRet1;
-      lpRet2 = (1.0 - aTa2) * lpRet1 + aTa2 * lpRet2;
-      const pLoad = Math.tanh(L[0] * 1.3);
-      const uGlot = vo * pLung * (1.0 + cycShim) * lpRet2 * (1.0 - 0.08 * pLoad);
-      const w = rng.uniform(-1.0, 1.0);
-      const h1 = 0.72 * (hp1 + w - wPrev); wPrev = w; hp1 = h1;
-      const h2 = 0.72 * (hp2 + h1 - hp1Prev); hp1Prev = h1; hp2 = h2;
-      lpA1 = 0.14 * h2 + 0.86 * lpA1;
-      lpA2 = 0.14 * lpA1 + 0.86 * lpA2;
-      const wm = rng.uniform(-1.0, 1.0);
-      const mh = 0.92 * (mHp + wm - mWPrev); mWPrev = wm; mHp = mh;
-      mLp1 = 0.14 * mh + 0.86 * mLp1;
-      mLp2 = 0.14 * mLp1 + 0.86 * mLp2;
-      mLp3 = 0.14 * mLp2 + 0.86 * mLp3;
-      const openMod = 0.26 + 0.74 * Math.min(1.4, lpRet2);
-      const breathMult = 1.0 + 2.1 * sigh + 0.34 * Math.max(0, rd - 1.45);
-      const glotH = (1.0 - vo) * glotF * 1.50 * (0.72 * mLp3 + 0.28 * lpA2);
-      const glotJet = (vo * pLung * openMod * breathMult * (asp * lpA2 * 0.44 + aspMid * mLp3 * 0.78) + glotH);
-      const rg = 0.920 - 0.130 * vo * Math.min(1.2, lpRet2);
-      Rn[0] = (uGlot + glotJet) + rg * L[0];
-      const tw = rng.uniform(-1.0, 1.0);
-      const sy1 = 0.67 * (sH1 + tw - sW0); sW0 = tw; sH1 = sy1;
-      const sy2 = 0.67 * (sH2 + sy1 - sW1); sW1 = sy1; sH2 = sy2;
-      const sy3 = 0.67 * (sH3 + sy2 - sW2); sW2 = sy2; sH3 = sy3;
-      sL1 = 0.26 * sy3 + 0.74 * sL1;
-      sL2 = 0.26 * sL1 + 0.74 * sL2;
-      const py1 = 0.75 * (pH1 + tw - pW0); pW0 = tw; pH1 = py1;
-      const py2 = 0.75 * (pH2 + py1 - pW1); pW1 = py1; pH2 = py2;
-      const py3 = 0.75 * (pH3 + py2 - pW2); pW2 = py2; pH3 = py3;
-      pL1 = 0.20 * py3 + 0.80 * pL1;
-      pL2 = 0.20 * pL1 + 0.80 * pL2;
-      const bh = 0.94 * (bHp + tw - bWPrev); bWPrev = tw; bHp = bh;
-      bLp1 = 0.11 * bh + 0.89 * bLp1;
-      bLp2 = 0.15 * bLp1 + 0.85 * bLp2;
-      const sibDip = 0.50 * (sibAlvF * (sL2 * 1.22) + sibPalF * (pL2 * 1.28));
-      const burstNoise = (fJ === 27) ? (bLp2 * 0.88 + pL2 * 0.24 + sL2 * 0.14) : (bLp2 * 1.22);
-      const brdDip = 0.50 * (broadF * (bLp2 * 1.85) + burstDrive * burstNoise);
-      const turbDipole = (fJ > 4) ? (sibDip + brdDip) : 0.0;
-      const fwdFrac = (sibAlvF + sibPalF) > 0.15 ? 0.95 : 0.72;
-      for (let j = 0; j < M - 1; j++) {
-        const wL = j <= 3 ? epiLoss : (j >= 10 && j <= 24 ? cheekLoss : wallLoss);
-        if (j === PIR_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
-          const pa = R[j], pb = L[j + 1], pc = pL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * wallLoss;
-          Rn[j + 1] = (PJ - pb) * wallLoss;
-          const pIn = (PJ - pc) * 0.95;
-          for (let q = MP - 1; q > 0; q--) pR[q] = pR[q - 1] * 0.95;
-          pR[0] = pIn;
-          for (let q = 0; q < MP - 1; q++) pL[q] = pL[q + 1] * 0.95;
-          pL[MP - 1] = pR[MP - 1] * 0.85;
-        } else if (j === VEL_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = Math.max(0.0, velA);
-          const pa = R[j], pb = L[j + 1], pc = nL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          nRn[0] = velGate * (PJ - pc) * nasalLoss;
-        } else if (j === SIN_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = acSinus;
-          const pa = R[j], pb = L[j + 1], pc = sL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          const sIn = (PJ - pc) * 0.992;
-          for (let q = MS - 1; q > 0; q--) sR[q] = sR[q - 1] * 0.992;
-          sR[0] = sIn;
-          for (let q = 0; q < MS - 1; q++) sL[q] = sL[q + 1] * 0.992;
-          sL[MS - 1] = sR[MS - 1] * 0.90;
-        } else {
-          const wS = k[j] * (R[j] - L[j + 1]);
-          Rn[j + 1] = (R[j] + wS) * wL;
-          Ln[j] = (L[j + 1] + wS) * wL;
-        }
-        if (j === fJ && turbDipole !== 0.0) {
-          Rn[j + 1] += fwdFrac * turbDipole;
-          Ln[j] -= (1.0 - fwdFrac) * turbDipole;
-        }
-      }
-      for (let q = 0; q < MN - 1; q++) {
-        const wn = nK[q] * (nR[q] - nL[q + 1]);
-        nRn[q + 1] = (nR[q] + wn) * nasalLoss;
-        nLn[q] = (nL[q + 1] + wn) * nasalLoss;
-      }
-      const nInc = nR[MN - 1];
-      radNosState = (1.0 - aNos) * nInc + aNos * radNosState;
-      const nRefl = -0.988 * radNosState;
-      nLn[MN - 1] = nRefl;
-      const pRadNos = (nInc + nRefl) * Math.sqrt(nA[MN - 1] / 3.0) * 1.15;
-      const pInc = R[M - 1];
-      radLipState = (1.0 - aR) * pInc + aR * radLipState;
-      const pRefl = -0.992 * radLipState;
-      Ln[M - 1] = pRefl;
-      const pRadLip = (pInc + pRefl) * lipGain + labPop * bLp2 * 0.30;
-      const pPhar = 0.5 * (R[5] + L[5]);
-      wallLp1 = 0.020 * pPhar + 0.980 * wallLp1;
-      wallLp2 = 0.020 * wallLp1 + 0.980 * wallLp2;
-      const pWall = stopW * vo * wallLp2 * 0.048;
-      for (let j = 0; j < M; j++) { R[j] = Rn[j]; L[j] = Ln[j]; }
-      for (let q = 0; q < MN; q++) { nR[q] = nRn[q]; nL[q] = nLn[q]; }
-      const pTot = pRadLip + pRadNos + pWall;
-      viscLp1 = 0.50 * pTot + 0.50 * viscLp1;
-      viscLp2 = 0.50 * viscLp1 + 0.50 * viscLp2;
-      sampleOut += 0.5 * viscLp2;
-    }
-    rawOut[i] = sampleOut;
-  }
-  let dcX = 0, dcY = 0;
-  for (let i = 0; i < N; i++) {
-    const y = rawOut[i] - dcX + 0.993 * dcY;
-    dcX = rawOut[i]; dcY = y; rawOut[i] = y;
-  }
-  for (const [apBase, apMod, fMod, ph0] of [[0.46, 0.25, 5.1, 0.3], [-0.40, 0.22, 7.3, 1.8], [0.28, 0.18, 9.7, 3.1]]) {
-    let ax1 = 0.0, ay1 = 0.0;
-    for (let i = 0; i < N; i++) {
-      const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
-      const sec = i / SR;
-      const ap = Math.max(-0.78, Math.min(0.78, apBase + 0.08 * Math.tanh((A_tr[fIdx][24] - 2.4) * 0.5) + apMod * Math.sin(2 * Math.PI * fMod * sec + ph0)));
-      const xi = rawOut[i], yi = ap * xi + ax1 - ap * ay1;
-      ax1 = xi; ay1 = yi; rawOut[i] = yi;
-    }
-  }
+  let rngA = runKudaWaveguide(sc, rawOut, +seed, +asp, +aspMid, +bernS);
+  const invFrameStep = 1.0 / (fpz * SR);
   {
     const win = Math.trunc(0.065 * SR);
     const rmsArr = new Float64Array(N);
     let sqSum = 0.0;
     for (let i = 0; i < N; i++) {
-      sqSum += rawOut[i] * rawOut[i];
-      if (i >= win) sqSum -= rawOut[i - win] * rawOut[i - win];
-      rmsArr[i] = Math.sqrt(Math.max(0, sqSum) / Math.min(i + 1, win));
+      const v = rawOut[i];
+      sqSum += v * v;
+      if (i >= win) { const ov = rawOut[i - win]; sqSum -= ov * ov; }
+      rmsArr[i] = Math.sqrt((sqSum > 0 ? sqSum : 0) / (i + 1 < win ? i + 1 : win));
     }
     const vRmsList = [];
     for (let t = 0; t < n; t++) {
@@ -1804,7 +1970,7 @@ function synthKuda(text, opts = {}) {
     const refRms = vRmsList.length ? vRmsList[Math.floor(vRmsList.length * 0.65)] : 0.1;
     let gSm = 1.0;
     for (let i = 0; i < N; i++) {
-      const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
+      const fIdx = Math.min(n - 1, (i * invFrameStep) | 0);
       const active = Math.min(1.0, voSm[fIdx] + 0.85 * fricSm[fIdx]) * (1.0 - 0.72 * sighSm[fIdx]);
       const ratio = Math.min(1.65, Math.max(0.76, refRms / (rmsArr[i] + 0.24 * refRms)));
       const targetG = 1.0 + 0.26 * active * (ratio - 1.0);
@@ -1818,8 +1984,12 @@ function synthKuda(text, opts = {}) {
   const rawRms = Math.sqrt(sq / N);
   const gNorm = pk > 1e-9 ? Math.min(0.85 / pk, 0.082 / Math.max(1e-6, rawRms)) : 0.0;
   const edgeFade = Math.min(Math.trunc(0.15 * SR), Math.floor(N / 4));
+  let roomLp1 = 0.0, roomLp2 = 0.0;
   for (let i = 0; i < N; i++) {
-    const rn = rng.uniform(-1.0, 1.0);
+    rngA = (rngA + 0x6d2b79f5) | 0;
+    let t = Math.imul(rngA ^ (rngA >>> 15), 1 | rngA);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    const rn = -1.0 + 2.0 * (((t ^ (t >>> 14)) >>> 0) / 4294967296.0);
     roomLp1 = 0.90 * roomLp1 + 0.10 * rn;
     roomLp2 = 0.82 * roomLp2 + 0.18 * roomLp1;
     const wRoom = i < edgeFade ? (i / edgeFade) : (N - 1 - i < edgeFade ? ((N - 1 - i) / edgeFade) : 1.0);
@@ -1833,7 +2003,7 @@ function synthKuda(text, opts = {}) {
     const ratio = SR / srOut;
     for (let i = 0; i < nOut; i++) {
       const p = i * ratio;
-      const k0 = Math.min(N - 1, Math.floor(p)), f = p - k0;
+      const k0 = Math.min(N - 1, p | 0), f = p - k0;
       samples[i] = src[k0] * (1 - f) + src[Math.min(N - 1, k0 + 1)] * f;
     }
   }

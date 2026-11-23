@@ -9,9 +9,9 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1.2";
-const PLAYER_REV = "v0.1.2";
-const VERSION_NOTE = "ローマ字・英字入力対応 (konnichiwa / JavaScript等) ＋ 開けた瞬間自動発話 ＋ 息もれ/倍速(0.5x–2.0x)スライダ";
+const VERSION = "v0.1.3-turbo";
+const PLAYER_REV = "v0.1.3-turbo";
+const VERSION_NOTE = "4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
