@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="robots" content="noindex">
 <link rel="canonical" href="https://poidowl.github.io/tokiko/">
-<title>tokiko / KUDA v0.1.4-kawaii — 仮想発声器官 プレイヤー</title>
+<title>tokiko / KUDA v0.1.5-kawaii — 仮想発声器官 プレイヤー</title>
 <style>
   :root {
     --bg: #0c0f12;
@@ -352,7 +352,7 @@
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
     <div class="meta-right">
-      <span class="stat-chip">85KB · 0B</span>
+      <span class="stat-chip">111KB · 0B</span>
       <a class="gh-link" href="https://github.com/poidowl/tokiko" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
     </div>
   </div>
@@ -408,10 +408,10 @@
 
   <footer class="ver-foot">
     <div class="ver-top">
-      <div><span class="ver-badge">v0.1.4-kawaii</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
+      <div><span class="ver-badge">v0.1.5-kawaii</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
       <span id="synthStat">待機中 · 24kHz</span>
     </div>
-    <div class="ver-note" title="かわいさ全盛り(kawaii)：後部声門間隙×スナップ閉鎖＋記号演技(！〜…っ)＋ささやき＋高音「ツ/ジ」調音修正">変更: かわいさ全盛り(kawaii)：後部声門間隙×スナップ閉鎖＋記号演技(！〜…っ)＋ささやき＋高音「ツ/ジ」調音修正</div>
+    <div class="ver-note" title="かわいさ純物理5大数学フル搭載(Sturm-Liouville直交射影×Hopf分岐×最小躍度/Task Dynamics×1/fゆらぎ×高音F1-F0追従)＋ざじずぜぞ/あじ/ヘルツ/ち完全修正">変更: かわいさ純物理5大数学フル搭載(Sturm-Liouville直交射影×Hopf分岐×最小躍度/Task Dynamics×1/fゆらぎ×高音F1-F0追従)＋ざじずぜぞ/あじ/ヘルツ/ち完全修正</div>
   </footer>
 </div>
 
@@ -456,6 +456,30 @@ function makeRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296.0;
   };
   return { random, uniform: (lo, hi) => lo + (hi - lo) * random() };
+}
+function makePinkGen(seed, nOct = 5, ouTauSec = 0.030, fpz = 0.005) {
+  const r = makeRng(seed);
+  const oct = new Float64Array(nOct);
+  let sum = 0.0;
+  for (let k = 0; k < nOct; k++) {
+    oct[k] = r.random() + r.random() - 1.0;
+    sum += oct[k];
+  }
+  const alpha = Math.exp(-fpz / Math.max(0.008, ouTauSec));
+  const ouScale = Math.sqrt(Math.max(0.0, 1.0 - alpha * alpha));
+  const invN = 1.0 / Math.sqrt(nOct);
+  let ou = 0.0, step = 0;
+  return () => {
+    step++;
+    let tz = 0, x = step;
+    while ((x & 1) === 0 && tz < nOct - 1) { x >>= 1; tz++; }
+    const nv = r.random() + r.random() - 1.0;
+    sum += nv - oct[tz];
+    oct[tz] = nv;
+    const pink = sum * invN;
+    ou = alpha * ou + ouScale * pink;
+    return Math.tanh(0.84 * pink + 0.24 * ou);
+  };
 }
 const ROMA3 = {
   sha: "シャ", shi: "シ", shu: "シュ", she: "シェ", sho: "ショ",
@@ -582,6 +606,70 @@ function smooth1(x, ms) {
   }
   return out;
 }
+function minJerk(u) {
+  if (!Number.isFinite(u) || u <= 0.0) return 0.0;
+  const t = u >= 1.0 ? 1.0 : u;
+  return t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
+}
+function taskDyn(x, omegaN, zeta, fpz, leadFrac = 1.0) {
+  const n = x.length;
+  if (n === 0) return [];
+  const w = Number.isFinite(omegaN) ? Math.max(1e-3, Math.min(5000.0, omegaN)) : 140.0;
+  const z = Number.isFinite(zeta) ? Math.max(1e-3, Math.min(10.0, zeta)) : 1.0;
+  const dt = Number.isFinite(fpz) && fpz > 0.0 ? fpz : 0.005;
+  let a11, a12, a21, a22;
+  if (Math.abs(z - 1.0) < 1e-4) {
+    const e = Math.exp(-w * dt);
+    a11 = e * (1.0 + w * dt);
+    a12 = e * dt;
+    a21 = -e * w * w * dt;
+    a22 = e * (1.0 - w * dt);
+  } else if (z < 1.0) {
+    const sq = Math.sqrt(1.0 - z * z);
+    const wd = w * sq;
+    const e = Math.exp(-z * w * dt);
+    const c = Math.cos(wd * dt), s = Math.sin(wd * dt);
+    const zs = (z / sq) * s;
+    a11 = e * (c + zs);
+    a12 = e * (s / wd);
+    a21 = -e * (w / sq) * s;
+    a22 = e * (c - zs);
+  } else {
+    const sq = Math.sqrt(z * z - 1.0);
+    const alpha = w * sq;
+    const e1 = Math.exp((-z * w + alpha) * dt);
+    const e2 = Math.exp((-z * w - alpha) * dt);
+    const ch = 0.5 * (e1 + e2), sh = 0.5 * (e1 - e2);
+    const zs = (z / sq) * sh;
+    a11 = ch + zs;
+    a12 = sh / alpha;
+    a21 = -(w / sq) * sh;
+    a22 = ch - zs;
+  }
+  const b1 = 1.0 - a11;
+  const b2 = -a21;
+  const t50 = (0.822 + 0.692 * z + 0.164 * z * z) / w;
+  const leadF = leadFrac > 0.0 ? Math.max(0.0, (leadFrac * t50) / dt - 0.5) : 0.0;
+  const out = new Array(n);
+  let q = x[0], v = 0.0;
+  for (let t = 0; t < n; t++) {
+    let u;
+    if (leadF > 1e-6) {
+      const p = t + leadF;
+      const i0 = Math.min(n - 1, Math.floor(p));
+      const i1 = Math.min(n - 1, i0 + 1);
+      u = x[i0] + (x[i1] - x[i0]) * (p - i0);
+    } else {
+      u = x[t];
+    }
+    const qn = a11 * q + a12 * v + b1 * u;
+    const vn = a21 * q + a22 * v + b2 * u;
+    q = qn;
+    v = vn;
+    out[t] = q;
+  }
+  return out;
+}
 function encodeWav(samples, sampleRate = SR) {
   const n = samples.length, buf = new ArrayBuffer(44 + n * 2), view = new DataView(buf);
   const writeAscii = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
@@ -608,10 +696,10 @@ const VEL_J = 14;
 const SIN_J = 15;
 const PIR_J = 4;
 const KUDA_PRESETS = {
-  kawaii:   { hz: 302.0, smile: 0.56, rd_base: 1.42, rd_tail: 2.28, bernS: 4.10, scoop: 1.65, asp: 0.049, aspMid: 0.200, rate: 1.00 },
-  amae:     { hz: 290.0, smile: 0.50, rd_base: 1.60, rd_tail: 2.62, bernS: 3.65, scoop: 2.05, asp: 0.068, aspMid: 0.275, rate: 1.09 },
-  genki:    { hz: 320.0, smile: 0.72, rd_base: 1.36, rd_tail: 2.12, bernS: 4.30, scoop: 1.55, asp: 0.044, aspMid: 0.175, rate: 0.93 },
-  sasayaki: { hz: 288.0, smile: 0.48, rd_base: 2.35, rd_tail: 3.25, bernS: 2.40, scoop: 1.40, asp: 0.165, aspMid: 0.620, rate: 1.10 },
+  kawaii:   { hz: 302.0, smile: 0.56, rd_base: 1.45, rd_tail: 2.28, bernS: 4.15, scoop: 1.72, asp: 0.049, aspMid: 0.200, rate: 1.00, tdZeta: 0.87, slLift: 0.115, hopf: 0.55 },
+  amae:     { hz: 290.0, smile: 0.50, rd_base: 1.60, rd_tail: 2.62, bernS: 3.65, scoop: 2.05, asp: 0.068, aspMid: 0.275, rate: 1.09, tdZeta: 1.18, slLift: 0.08, hopf: 0.78 },
+  genki:    { hz: 320.0, smile: 0.72, rd_base: 1.36, rd_tail: 2.12, bernS: 4.30, scoop: 1.55, asp: 0.044, aspMid: 0.175, rate: 0.93, tdZeta: 0.80, slLift: 0.13, hopf: 0.35 },
+  sasayaki: { hz: 288.0, smile: 0.48, rd_base: 2.35, rd_tail: 3.25, bernS: 2.40, scoop: 1.40, asp: 0.165, aspMid: 0.620, rate: 1.10, tdZeta: 1.25, slLift: 0.06, hopf: 0.90 },
 };
 const K2V = {};
 for (const [row, cons] of [
@@ -633,7 +721,7 @@ const PAUSE = new Set(Array.from("、。，．,.!！?？…‥ 　"));
 const PLACE = {
   p: "lab", b: "lab", m: "lab", f: "lab", w: "lab",
   t: "alv", d: "alv", n: "alv", s: "alv", z: "alv", ts: "alv", r: "alv",
-  sh: "pal", ch: "pal", j: "apal", y: "pal",
+  sh: "pal", ch: "apal", j: "apal", y: "pal",
   k: "vel", g: "vel", h: "glot", "": null,
 };
 const MANNER = {
@@ -967,6 +1055,105 @@ function buildVowelArea(v, smile = 0.52) {
   }
   return A;
 }
+const SL_C_SND = 35000.0;
+const SL_DX = SL_C_SND / (2.0 * SR);
+function slBoundary(A, freqHz) {
+  const k = (2.0 * Math.PI * freqHz) / SL_C_SND;
+  const kdx = k * SL_DX;
+  const c = Math.cos(kdx), s = Math.sin(kdx);
+  let p = 1.0, q = 0.0;
+  for (let j = 0; j < M; j++) {
+    const Aj = Math.max(0.15, A[j]);
+    const pn = c * p - (s / Aj) * q;
+    const qn = (Aj * s) * p + c * q;
+    p = pn; q = qn;
+  }
+  const aLip = Math.max(0.15, A[M - 1]);
+  const dL = (8.0 / (3.0 * Math.PI)) * Math.sqrt(aLip / Math.PI);
+  return p - (k * dL / aLip) * q;
+}
+function computeTractModes(A, nModes = 4) {
+  const modes = [];
+  let prevF = 160.0, prevV = slBoundary(A, prevF);
+  for (let f = 180.0; f <= 7400.0 && modes.length < nModes; f += 20.0) {
+    const v = slBoundary(A, f);
+    if (prevV === 0.0 || (prevV < 0.0 && v > 0.0) || (prevV > 0.0 && v < 0.0)) {
+      let lo = prevF, hi = f, vlo = prevV;
+      for (let it = 0; it < 22; it++) {
+        const mid = 0.5 * (lo + hi);
+        const vm = slBoundary(A, mid);
+        if ((vlo <= 0.0 && vm <= 0.0) || (vlo >= 0.0 && vm >= 0.0)) { lo = mid; vlo = vm; }
+        else hi = mid;
+      }
+      modes.push(0.5 * (lo + hi));
+    }
+    prevF = f; prevV = v;
+  }
+  return modes;
+}
+function computeSensitivity(A, freqHz) {
+  const k = (2.0 * Math.PI * freqHz) / SL_C_SND;
+  const kdx = k * SL_DX;
+  const c = Math.cos(kdx), s = Math.sin(kdx);
+  const cH = Math.cos(0.5 * kdx), sH = Math.sin(0.5 * kdx);
+  let p = 1.0, q = 0.0, tot = 0.0;
+  const num = new Float64Array(M);
+  for (let j = 0; j < M; j++) {
+    const Aj = Math.max(0.15, A[j]);
+    const pm = cH * p - (sH / Aj) * q;
+    const qm = (Aj * sH) * p + cH * q;
+    const ke = (qm * qm) / Aj;
+    const pe = Aj * pm * pm;
+    num[j] = ke - pe;
+    tot += ke + pe;
+    const pn = c * p - (s / Aj) * q;
+    const qn = (Aj * s) * p + c * q;
+    p = pn; q = qn;
+  }
+  const S = new Float64Array(M);
+  const inv = 1.0 / (tot + 1e-12);
+  for (let j = 0; j < M; j++) S[j] = num[j] * inv;
+  return S;
+}
+function buildSturmLiouvilleBasis(A) {
+  const modes = computeTractModes(A, 4);
+  const dShimmer = new Float64Array(M);
+  const dJaw = new Float64Array(M);
+  if (modes.length < 4) return { modes, dShimmer, dJaw };
+  const S1 = computeSensitivity(A, modes[0]);
+  const S2 = computeSensitivity(A, modes[1]);
+  const S3 = computeSensitivity(A, modes[2]);
+  const S4 = computeSensitivity(A, modes[3]);
+  const dot = (u, v) => { let s = 0.0; for (let j = 5; j < M; j++) s += u[j] * v[j]; return s; };
+  const e1 = new Float64Array(M), e2 = new Float64Array(M);
+  const n1 = Math.sqrt(dot(S1, S1)) + 1e-12;
+  for (let j = 5; j < M; j++) e1[j] = S1[j] / n1;
+  const d12 = dot(S2, e1);
+  for (let j = 5; j < M; j++) e2[j] = S2[j] - d12 * e1[j];
+  const n2 = Math.sqrt(dot(e2, e2)) + 1e-12;
+  for (let j = 5; j < M; j++) e2[j] /= n2;
+  let maxS = 1e-12;
+  for (let j = 5; j < M; j++) dShimmer[j] = 0.45 * S3[j] + 0.75 * S4[j];
+  const p1 = dot(dShimmer, e1), p2 = dot(dShimmer, e2);
+  for (let j = 5; j < M; j++) {
+    dShimmer[j] -= p1 * e1[j] + p2 * e2[j];
+    const ab = Math.abs(dShimmer[j]);
+    if (ab > maxS) maxS = ab;
+  }
+  for (let j = 5; j < M; j++) dShimmer[j] /= maxS;
+  const e2o = new Float64Array(M);
+  const n2o = Math.sqrt(dot(S2, S2)) + 1e-12;
+  for (let j = 5; j < M; j++) e2o[j] = S2[j] / n2o;
+  const p12 = dot(S1, e2o);
+  let maxJ = 1e-12;
+  for (let j = 5; j < M; j++) {
+    dJaw[j] = S1[j] - p12 * e2o[j];
+    const ab = Math.abs(dJaw[j]);
+    if (ab > maxJ) maxJ = ab;
+  }
+  for (let j = 5; j < M; j++) dJaw[j] /= maxJ;
+  return { modes, dShimmer, dJaw };
+}
 function buildConsPostures() {
   const g = (j, c, w) => Math.exp(-0.5 * Math.pow((j - c) / w, 2));
   const out = {};
@@ -1016,23 +1203,32 @@ function effPlace(c, v, pal) {
 }
 function buildScore(text, opts = {}) {
   const {
-    rate = 1.0,
-    pau_s = 0.24,
-    flatHz = null,
+    rate: rawRate = 1.0,
+    pau_s: rawPauS = 0.24,
+    flatHz: rawFlatHz = null,
     uta_hz = null,
-    hz = 302.0,
+    hz: rawHz = 302.0,
     smile = 0.56,
     rd_base = 1.42,
     rd_tail = 2.28,
     scoop = 1.65,
     flatTiming = false,
-    seed = 2024,
+    seed: rawSeed = 2024,
     asp = 0.049,
     aspMid = 0.200,
     nama = true,
     lungCap = 1.0,
     inhale = 1.0,
+    tdZeta = 0.96,
+    slLift: rawSlLift = 0.11,
+    tractScale = "auto",
   } = opts;
+  const rate = Number.isFinite(rawRate) ? Math.max(0.25, Math.min(3.0, rawRate)) : 1.0;
+  const pau_s = Number.isFinite(rawPauS) ? Math.max(0.0, Math.min(2.0, rawPauS)) : 0.24;
+  const hz = Number.isFinite(rawHz) ? Math.max(60.0, Math.min(800.0, rawHz)) : 302.0;
+  const flatHz = (rawFlatHz !== null && Number.isFinite(rawFlatHz) && rawFlatHz > 0.0) ? Math.max(60.0, Math.min(800.0, rawFlatHz)) : null;
+  const seed = Number.isFinite(rawSeed) ? rawSeed : 2024;
+  const slLift = Number.isFinite(rawSlLift) ? Math.max(-0.22, Math.min(0.22, rawSlLift)) : 0.11;
   const rawMs = parseMoras(text);
   const dec = rawMs.map((m, idx) => ({ raw: m, ...decodeMora(m), idx }));
   const [, annPhrases] = annotate(text);
@@ -1054,7 +1250,7 @@ function buildScore(text, opts = {}) {
       ord += L;
     }
   }
-  const CDUR = { "": 0, k: 0.072, g: 0.054, s: 0.106, z: 0.092, sh: 0.106, j: 0.082, t: 0.061, d: 0.055, ch: 0.104, ts: 0.098, n: 0.056, h: 0.074, f: 0.072, m: 0.058, y: 0.038, r: 0.032, w: 0.048, b: 0.048, p: 0.070 };
+  const CDUR = { "": 0, k: 0.072, g: 0.054, s: 0.106, z: 0.096, sh: 0.106, j: 0.088, t: 0.061, d: 0.055, ch: 0.104, ts: 0.102, n: 0.056, h: 0.074, f: 0.072, m: 0.058, y: 0.038, r: 0.032, w: 0.036, b: 0.048, p: 0.070 };
   const VDUR = { a: 0.094, e: 0.090, i: 0.086, o: 0.096, u: 0.086 };
   const phraseLen = new Int32Array(dec.length);
   for (let i = 0; i < dec.length; ) {
@@ -1116,9 +1312,11 @@ function buildScore(text, opts = {}) {
     const cd = (flatTiming ? (d.c ? 0.072 : 0.0) : (CDUR[d.c] || 0.0)) * rate * (mood === 2 ? 0.96 : 1.0);
     let vd = (flatTiming ? 0.092 : (VDUR[d.v] || 0.088)) * rate * moodRate;
     const beforeFinalQ = nxt && nxt.kind === "Q" && (!nxt2 || nxt2.kind === "pau");
+    const beforeFinalDevSu = !flatTiming && nxt && (i + 1 === dec.length - 1) && nxt.kind === "CV" && (nxt.c === "s" || nxt.c === "sh") && (nxt.v === "u" || nxt.v === "i");
     if (!flatTiming && isPhraseStart && pLen >= 2) vd *= 0.94;
     if (beforeFinalQ) vd *= 0.84;
     else if (isUttEnd) vd *= 1.48;
+    else if (beforeFinalDevSu) vd *= 1.24;
     else if (isPhraseEnd && pLen >= 2) vd *= 1.28;
     else if (isPhraseEnd && pLen === 1) vd *= 2.05;
     const nextVL = nxt && (
@@ -1136,14 +1334,29 @@ function buildScore(text, opts = {}) {
   const fpz = FP / 1000.0;
   const n = Math.max(1, Math.ceil(totalT / fpz));
   const VAREA = {};
+  const SL_BASIS = {};
   const effSmile = smile + (hasExclaim ? 0.14 : 0.0);
-  for (const v of ["a", "i", "u", "e", "o", ""]) VAREA[v] = buildVowelArea(v, effSmile);
+  const effSlLift = nama ? Math.max(-0.22, Math.min(0.22, slLift + (hasExclaim && slLift > 0.0 ? 0.025 : 0.0))) : 0.0;
+  for (const v of ["a", "i", "u", "e", "o", ""]) {
+    const baseA = buildVowelArea(v, effSmile);
+    if (v) {
+      const basis = buildSturmLiouvilleBasis(baseA);
+      SL_BASIS[v] = basis;
+      if (Math.abs(effSlLift) > 1e-6 && basis.modes.length >= 4) {
+        for (let j = 5; j < M; j++) {
+          baseA[j] = Math.max(0.22, Math.min(8.5, baseA[j] * Math.exp(effSlLift * basis.dShimmer[j])));
+        }
+      }
+    }
+    VAREA[v] = baseA;
+  }
   const CPOST = buildConsPostures();
   const A_tr = Array.from({ length: n }, () => new Float64Array(M));
   const vel_tr = new Float64Array(n);
   const vo_tr = new Float64Array(n);
   const rd_tr = new Float64Array(n);
   const chink_tr = new Float64Array(n);
+  const breathDyn_tr = new Float64Array(n).fill(1.0);
   const pLung_tr = new Float64Array(n);
   const fric_tr = new Float64Array(n);
   const sibAlvFric_tr = new Float64Array(n);
@@ -1159,6 +1372,9 @@ function buildScore(text, opts = {}) {
   const labPop_tr = new Float64Array(n);
   const fricJ_tr = new Int32Array(n).fill(-1);
   const stop_tr = new Float64Array(n);
+  const affrStop_tr = new Float64Array(n);
+  const vAffrSeal_tr = new Float64Array(n);
+  const bareStart_tr = new Float64Array(n);
   const sigh_tr = new Float64Array(n);
   const scoop_tr = new Float64Array(n);
   const lipPart_tr = new Float64Array(n);
@@ -1181,6 +1397,7 @@ function buildScore(text, opts = {}) {
     }
   }
   const rawA = Array.from({ length: M }, () => new Float64Array(n));
+  const vTrack = new Array(n);
   for (let t = 0; t < n; t++) {
     const sec = (t + 0.5) * fpz;
     const ei = evIdx[t];
@@ -1210,7 +1427,7 @@ function buildScore(text, opts = {}) {
           cPostW = sec < ev.cEnd ? 0.90 : Math.max(0, 0.90 * (1.0 - (sec - ev.cEnd) / 0.034));
         } else if (ev.c === "w") {
           cPostKey = "lab";
-          cPostW = sec < ev.cEnd ? 1.0 : Math.max(0, 1.0 - (sec - ev.cEnd) / 0.042);
+          cPostW = sec < ev.cEnd ? 0.65 : Math.max(0, 0.65 * (1.0 - (sec - ev.cEnd) / 0.032));
         } else if (mn === "tap") {
           cPostKey = "r";
           cPostW = sec < ev.cEnd ? 0.85 : Math.max(0, 0.78 * Math.pow(Math.max(0, 1.0 - (sec - ev.cEnd) / 0.032), 1.3));
@@ -1242,6 +1459,7 @@ function buildScore(text, opts = {}) {
       const ni = nextStartIdx[t];
       v = nextVFrom[ni] || prevVUpTo[ni] || "a";
     }
+    vTrack[t] = v;
     const base = VAREA[v];
     const cp = cPostKey ? CPOST[cPostKey] : null;
     for (let j = 0; j < M; j++) {
@@ -1252,14 +1470,35 @@ function buildScore(text, opts = {}) {
     }
   }
   const fastAmt = nama ? Math.max(0.0, Math.min(1.0, (0.85 - rate) / 0.35)) : 0.0;
+  const effZeta = nama ? Math.max(0.75, Math.min(1.40, Number.isFinite(tdZeta) ? tdZeta : 0.96)) : 1.00;
+  const pinkTract1 = new Float64Array(n);
+  const pinkTract2 = new Float64Array(n);
+  if (nama) {
+    const pgA = makePinkGen(seed + 14923, 5, 0.24, fpz);
+    const pgB = makePinkGen(seed + 19381, 5, 0.20, fpz);
+    for (let t = 0; t < n; t++) { pinkTract1[t] = pgA(); pinkTract2[t] = pgB(); }
+  }
   for (let j = 0; j < M; j++) {
-    const winMs = nama
-      ? (j <= 4 ? 18 : (j <= 14 ? 19 + 14 * fastAmt : (j <= 24 ? 18 + 11 * fastAmt : 18 + 6 * fastAmt)))
-      : 18;
-    const sm = smooth1(rawA[j], winMs);
+    let sm;
+    if (nama) {
+      const omegaN = j <= 4 ? 140.0
+        : (j <= 14 ? 130.0 - 30.0 * fastAmt
+          : (j <= 24 ? 150.0 - 30.0 * fastAmt : 175.0 - 25.0 * fastAmt));
+      const secZeta = j <= 4 ? Math.max(1.0, effZeta) : effZeta;
+      sm = taskDyn(rawA[j], omegaN, secZeta, fpz, 1.0);
+    } else {
+      sm = smooth1(rawA[j], 18);
+    }
+    const c1 = Math.cos(0.14 * j), s1 = Math.sin(0.14 * j);
     for (let t = 0; t < n; t++) {
-      const sec = t * fpz;
-      const sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
+      let sway;
+      if (nama) {
+        const pMix = c1 * pinkTract1[t] + s1 * pinkTract2[t];
+        sway = 1.0 + (j <= 4 ? 0.080 : 0.032) * pMix;
+      } else {
+        const sec = t * fpz;
+        sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
+      }
       A_tr[t][j] = Math.max(0.20, sm[t] * sway);
     }
   }
@@ -1281,6 +1520,30 @@ function buildScore(text, opts = {}) {
       vo_tr[t] = 0.0;
       pLung_tr[t] = 0.02;
       rd_tr[t] = rd_tail;
+      let ni = ev ? (ei + 1) : nextStartIdx[t];
+      while (ni < nEv && events[ni].kind === "pau") ni++;
+      const nextEv = ni < nEv ? events[ni] : null;
+      const nextBare = !!(nextEv && nextEv.isPhraseStart && nextEv.kind === "CV" && !nextEv.c && !nextEv.devoiced);
+      if (nextBare) {
+        const rem = nextEv.a - sec;
+        const pastPrev = !ev || (sec - ev.a) > Math.min(0.025, Math.max(0.0, (ev.e - ev.a) * 0.25));
+        if (pastPrev && rem >= 0.0 && rem < 0.032) {
+          const preU = minJerk((0.032 - rem) / 0.020);
+          rd_tr[t] = rd_tail + (rd_base - rd_tail) * preU;
+          chink_tr[t] = 0.36 + (0.30 - 0.36) * preU;
+        }
+      } else if (nextEv && nextEv.isPhraseStart && nextEv.kind === "CV" && (nextEv.c === "z" || nextEv.c === "j" || nextEv.c === "d" || nextEv.c === "g" || nextEv.c === "b")) {
+        const rem = nextEv.a - sec;
+        const pastPrev = !ev || (sec - ev.a) > Math.min(0.035, Math.max(0.0, (ev.e - ev.a) * 0.35));
+        if (pastPrev && rem >= 0.0 && rem < 0.018) {
+          const npl = effPlace(nextEv.c, nextEv.v, nextEv.pal);
+          if (npl && CONS_LOC[npl]) {
+            consAmt[npl][t] = 1.0;
+            consMinA[npl][t] = 0.006;
+            stop_tr[t] = 1.0;
+          }
+        }
+      }
       continue;
     }
     pLung_tr[t] = 0.95 + 0.05 * Math.sin(2 * Math.PI * 0.9 * sec);
@@ -1325,7 +1588,7 @@ function buildScore(text, opts = {}) {
     const isPalSib = PAL_SIB.has(ev.c);
     if (inCons && pl) {
       const u = (sec - ev.a) / Math.max(0.005, ev.cEnd - ev.a);
-      if (isPalSib) sibPalCav_tr[t] = 1.0;
+      if (isPalSib && mn !== "affr") sibPalCav_tr[t] = 1.0;
       if (pl !== "lab" && pl !== "glot") lipPart_tr[t] = 1.0;
       if (pl === "glot") {
         vo_tr[t] = u > 0.78 ? (u - 0.78) / 0.22 : 0.0;
@@ -1347,10 +1610,10 @@ function buildScore(text, opts = {}) {
       } else if (mn === "stop") {
         const isVL = VOICELESS.has(ev.c);
         const isVel = pl === "vel" || pl === "velA" || pl === "velF";
-        const holdEnd = isVL ? (isVel ? 0.50 : 0.56) : 0.60;
+        const holdEnd = isVL ? (isVel ? 0.50 : 0.56) : 0.56;
         if (u < holdEnd) {
-          vo_tr[t] = isVL ? 0.0 : 0.32;
-          if (!isVL) { voicedBool[t] = true; pLung_tr[t] *= 0.80; }
+          vo_tr[t] = isVL ? 0.0 : 0.42;
+          if (!isVL) { voicedBool[t] = true; pLung_tr[t] *= 0.85; rd_tr[t] = Math.min(2.05, rd_base + 0.22); }
           consAmt[pl][t] = 1.0;
           consMinA[pl][t] = 0.005;
           stop_tr[t] = 1.0;
@@ -1358,10 +1621,10 @@ function buildScore(text, opts = {}) {
         } else {
           const rel = (u - holdEnd) / (1.0 - holdEnd);
           const vlStart = isVel ? 0.70 : 0.65;
-          const vdWait = isVel ? 0.15 : 0.15;
+          const vdWait = 0.12;
           vo_tr[t] = isVL
             ? (rel > vlStart ? (rel - vlStart) / (1.0 - vlStart) : 0.0)
-            : (rel < vdWait ? 0.34 : (0.34 + 0.66 * Math.min(1.0, (rel - vdWait) / (1.0 - vdWait))));
+            : (rel < vdWait ? 0.36 : (0.36 + 0.64 * Math.min(1.0, (rel - vdWait) / (1.0 - vdWait))));
           if (!isVL || rel > vlStart) voicedBool[t] = true;
           consAmt[pl][t] = Math.max(0.0, 1.0 - 1.85 * rel);
           consMinA[pl][t] = 0.18 + 0.68 * rel;
@@ -1371,32 +1634,29 @@ function buildScore(text, opts = {}) {
             labPop_tr[t] = 0.44 * bEnv;
             if (isVL && rel < vlStart) glotFric_tr[t] = 0.38 * bEnv;
           } else {
-            const bAmp = isVL ? (pl === "alv" ? 0.96 : 0.70) : (pl === "alv" ? 0.86 : 0.56);
+            const bAmp = isVL ? (pl === "alv" ? 0.96 : 0.70) : (pl === "alv" ? 0.88 : 0.52);
             burst_tr[t] = bAmp * bEnv;
           }
           fricJ_tr[t] = CONS_LOC[pl].inj;
         }
       } else if (mn === "affr") {
         vo_tr[t] = 0.0;
-        const holdEnd = isAlvSib ? 0.38 : 0.22;
+        const holdEnd = isAlvSib ? 0.39 : 0.30;
         if (u < holdEnd) {
           consAmt[pl][t] = 1.0;
           consMinA[pl][t] = 0.005;
-          stop_tr[t] = isAlvSib ? 1.0 : 0.88;
-          if (!isAlvSib) {
-            const toe = 0.22 * Math.pow(u / holdEnd, 1.5);
-            fric_tr[t] = toe;
-            sibPalFric_tr[t] = toe;
-          }
+          stop_tr[t] = 1.0;
+          affrStop_tr[t] = 1.0;
         } else {
           const fr = (u - holdEnd) / (1.0 - holdEnd);
+          if (isPalSib && fr >= 0.14) sibPalCav_tr[t] = minJerk((fr - 0.14) / 0.24);
           consAmt[pl][t] = Math.max(0.76, 1.0 - 0.32 * fr);
           consMinA[pl][t] = 0.06 + 0.06 * fr;
           if (fr < 0.36) {
             const bEnv = Math.sin(Math.PI * Math.min(1.0, fr / 0.36));
-            burst_tr[t] = (isAlvSib ? 0.92 : 0.48) * bEnv;
+            burst_tr[t] = (isAlvSib ? 0.93 : 0.88) * bEnv;
           }
-          const af = (isAlvSib ? 0.0 : 0.22 * Math.max(0, 1.0 - fr * 2.5)) + 0.96 * Math.pow(Math.sin(Math.PI * Math.min(1, fr)), isAlvSib ? 1.45 : 1.75);
+          const af = 0.96 * Math.pow(Math.sin(Math.PI * Math.min(1, fr)), 1.45);
           fric_tr[t] = af;
           if (isAlvSib) sibAlvFric_tr[t] = af;
           else sibPalFric_tr[t] = af;
@@ -1406,30 +1666,41 @@ function buildScore(text, opts = {}) {
         const isVL = VOICELESS.has(ev.c);
         const prevEv = ei > 0 ? events[ei - 1] : undefined;
         const isWordInit = !prevEv || prevEv.kind === "pau" || prevEv.kind === "N";
-        const isAffrStart = !isVL && (ev.c === "j" || isWordInit);
-        const affrCut = (ev.c === "j") ? (isWordInit ? 0.28 : 0.26) : 0.12;
+        const isAffrStart = !isVL && (ev.c === "j" || ev.c === "z");
+        const affrCut = (ev.c === "j") ? (isWordInit ? 0.28 : 0.22) : (isWordInit ? 0.30 : 0.22);
         if (isAffrStart && u < affrCut) {
-          vo_tr[t] = (ev.c === "j") ? 0.90 : 0.72;
-          pLung_tr[t] *= (ev.c === "j") ? 1.00 : 0.95;
+          vo_tr[t] = isWordInit ? 0.76 : 0.70;
+          pLung_tr[t] *= 0.96;
+          rd_tr[t] = 1.90;
           voicedBool[t] = true;
           consAmt[pl][t] = 1.0;
-          consMinA[pl][t] = 0.010;
-          stop_tr[t] = 0.96;
-          vStop_tr[t] = 1.0;
+          consMinA[pl][t] = 0.006;
+          stop_tr[t] = 1.0;
+          vAffrSeal_tr[t] = 1.0;
+          vStop_tr[t] = 0.0;
           fricJ_tr[t] = CONS_LOC[pl].inj;
         } else {
           const fu = isAffrStart ? (u - affrCut) / (1.0 - affrCut) : u;
-          vo_tr[t] = isVL ? 0.0 : (ev.c === "j" ? 0.92 : 0.72);
+          vo_tr[t] = isVL ? 0.0 : (ev.c === "j" ? 0.50 : 0.48);
           if (!isVL) {
             voicedBool[t] = true;
-            pLung_tr[t] *= (ev.c === "j") ? 1.06 : 1.02;
+            rd_tr[t] = 2.06;
+            pLung_tr[t] *= (ev.c === "j") ? 0.91 : 0.93;
             if (ev.c === "j") vFricJ_tr[t] = 1.0;
             else vFricZ_tr[t] = 1.0;
+            if (isAffrStart && fu < 0.20) {
+              const bEnv = Math.sin(Math.PI * Math.min(1.0, fu / 0.20));
+              const bG = isWordInit ? (ev.c === "j" ? 0.28 : 0.26) : (ev.c === "j" ? 0.10 : 0.0);
+              if (bG > 0.0) burst_tr[t] = bG * bEnv;
+            }
           }
-          const envF = isVL ? Math.pow(Math.sin(Math.PI * Math.min(1, fu)), 1.85) : Math.pow(Math.sin(Math.PI * Math.min(1, fu)), 1.20);
-          consAmt[pl][t] = isVL ? 0.96 : 0.94;
-          consMinA[pl][t] = (ev.c === "f") ? 0.16 : (isVL ? 0.08 : 0.095);
-          const fv = (isVL ? (ev.c === "f" ? 0.70 : 1.00) : (ev.c === "j" ? 1.12 : 1.32)) * envF;
+          const mjF = fu < 0.50 ? minJerk(fu * 2.0) : minJerk((1.0 - fu) * 2.0);
+          const envF = isVL
+            ? Math.pow(mjF, 0.86)
+            : (minJerk(fu / 0.20) * minJerk((0.76 - fu) / 0.24));
+          consAmt[pl][t] = 0.96;
+          consMinA[pl][t] = (ev.c === "f") ? 0.16 : (isVL ? 0.08 : 0.068);
+          const fv = (isVL ? (ev.c === "f" ? 0.70 : 0.94) : (ev.c === "j" ? 0.86 : 0.86)) * envF;
           fric_tr[t] = fv;
           if (ev.c === "f") {
             lipPart_tr[t] = 0.45;
@@ -1443,31 +1714,31 @@ function buildScore(text, opts = {}) {
             vSibAlv_tr[t] = fv;
           } else if (!isVL && isPalSib) {
             vSibPal_tr[t] = fv;
-            vSibAlv_tr[t] = fv * 0.30;
+            vSibAlv_tr[t] = fv * 0.10;
           } else {
             broadFric_tr[t] = fv;
           }
           fricJ_tr[t] = CONS_LOC[pl].inj;
         }
       } else if (mn === "nas") {
-        const soft = ev.isPhraseStart ? (0.35 + 0.65 * Math.min(1, (sec - ev.a) / 0.024)) : 1.0;
+        const soft = ev.isPhraseStart ? (0.45 + 0.55 * minJerk((sec - ev.a) / 0.016)) : 1.0;
         vo_tr[t] = 0.84 * soft;
         voicedBool[t] = true;
         vel_tr[t] = 1.85;
         consAmt[pl][t] = 1.0;
         consMinA[pl][t] = 0.010;
         rd_tr[t] = rd_base + 0.14;
-        pLung_tr[t] *= 1.14 * soft;
+        pLung_tr[t] *= 1.14;
       } else if (mn === "tap") {
         const flap = Math.sin(Math.PI * u);
-        const soft = ev.isPhraseStart ? (0.35 + 0.65 * Math.min(1, (sec - ev.a) / 0.022)) : 1.0;
+        const soft = ev.isPhraseStart ? (0.35 + 0.65 * minJerk((sec - ev.a) / 0.022)) : 1.0;
         vo_tr[t] = (0.92 - 0.44 * flap) * soft;
         pLung_tr[t] *= (1.00 - 0.38 * flap) * soft;
         voicedBool[t] = true;
         consAmt[pl][t] = Math.min(1.0, flap * 1.04);
         consMinA[pl][t] = 0.060;
       } else if (mn === "glide") {
-        const soft = ev.isPhraseStart ? (0.28 + 0.72 * Math.min(1, (sec - ev.a) / 0.028)) : 1.0;
+        const soft = ev.isPhraseStart ? (0.28 + 0.72 * minJerk((sec - ev.a) / 0.028)) : 1.0;
         vo_tr[t] = 0.92 * soft;
         pLung_tr[t] *= 0.94 * soft;
         voicedBool[t] = true;
@@ -1476,6 +1747,9 @@ function buildScore(text, opts = {}) {
       const vU = (sec - ev.cEnd) / Math.max(0.01, ev.e - ev.cEnd);
       if (ev.devoiced) {
         vo_tr[t] = 0.0;
+        if (ev.isUttEnd || ev.isPhraseEnd) {
+          scoop_tr[t] = t > 0 ? scoop_tr[t - 1] : 0.0;
+        }
         if (isPalSib) sibPalCav_tr[t] = 0.90;
         if (pl !== "lab" && pl !== "glot") lipPart_tr[t] = 0.85;
         const df = ((isAlvSib || isPalSib) ? 0.74 : 0.55) * Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * vU)), 1.7);
@@ -1487,42 +1761,62 @@ function buildScore(text, opts = {}) {
         rd_tr[t] = 2.25;
       } else {
         const bareStart = ev.isPhraseStart && !ev.c;
-        const softOn = bareStart ? (0.30 + 0.70 * Math.min(1.0, (sec - ev.a) / 0.022)) : 1.0;
-        vo_tr[t] = bareStart ? Math.min(1.0, 0.35 + 0.65 * ((sec - ev.a) / 0.020)) : 1.0;
+        const softOn = 1.0;
+        if (bareStart && (sec - ev.a) < 0.024) {
+          bareStart_tr[t] = 1.0 - minJerk((sec - ev.a) / 0.024);
+        }
+        vo_tr[t] = bareStart ? (0.14 + 0.86 * minJerk((sec - ev.a) / 0.011)) : 1.0;
         if (ev.beforeFinalQ && vU > 0.82) {
-          vo_tr[t] *= Math.max(0.15, 1.0 - (vU - 0.82) / 0.18 * 0.85);
+          vo_tr[t] *= 1.0 - 0.85 * minJerk((vU - 0.82) / 0.18);
         }
         voicedBool[t] = true;
         const nxtEv = ei + 1 < nEv ? events[ei + 1] : null;
         const isVoicedUttEnd = ev.isUttEnd || !!(nxtEv && nxtEv.devoiced && nxtEv.isUttEnd);
         const isVoicedPhrEnd = ev.isPhraseEnd || !!(nxtEv && nxtEv.devoiced && nxtEv.isPhraseEnd);
         const longEnd = !ev.beforeFinalQ && (isVoicedUttEnd || (isVoicedPhrEnd && ev.pLen >= 2));
+        const sTailStart = hz > 360.0 ? 0.64 : 0.50;
         let sTail = 0.0;
-        if (longEnd && vU > 0.50) {
-          sTail = Math.pow((vU - 0.50) / 0.50, 1.30) * (isVoicedUttEnd ? 1.0 : 0.52);
+        if (longEnd && vU > sTailStart) {
+          sTail = minJerk((vU - sTailStart) / (1.0 - sTailStart)) * (isVoicedUttEnd ? 1.0 : 0.52);
         }
-        if (ev.tilde) sTail = Math.min(1.0, sTail + 0.34 * Math.pow(Math.max(0, vU), 1.1));
+        if (ev.tilde) sTail = Math.min(1.0, sTail + 0.34 * minJerk(vU));
         if (ev.mood === 3 && ev.fromEnd <= 1) sTail = Math.min(1.0, sTail + 0.32 * (ev.fromEnd === 0 ? 1.0 : 0.45));
-        if (longEnd && (ev.e - sec) < 0.112) {
-          const scU = 1.0 - Math.max(0, ev.e - sec) / 0.112;
+        const scWin = (isVoicedUttEnd && !ev.isUttEnd) ? 0.095 : 0.112;
+        if (longEnd && (ev.e - sec) < scWin) {
+          const scU = 1.0 - Math.max(0, ev.e - sec) / scWin;
           const moodBoost = ev.mood === 2 ? 1.25 : (ev.mood === 3 ? 0.35 : 1.0);
-          scoop_tr[t] = Math.pow(scU, 1.58) * (isVoicedUttEnd ? 1.0 : 0.82) * moodBoost;
+          const preDevBoost = (isVoicedUttEnd && !ev.isUttEnd) ? 2.22 : (isVoicedUttEnd ? 1.25 : 0.90);
+          scoop_tr[t] = (0.45 * minJerk(scU) + 0.55 * scU * scU) * preDevBoost * moodBoost;
         }
-        const edge = Math.max(0, 1.0 - vU * 4.5) * 0.16 + (vU > 0.82 ? (vU - 0.82) / 0.18 * 0.18 : 0);
+        const edge = 0.16 * minJerk(1.0 - vU * 4.5) + 0.18 * minJerk((vU - 0.82) / 0.18);
         sigh_tr[t] = sTail;
-        rd_tr[t] = rd_base + (rd_tail - rd_base) * sTail + 0.18 * edge + (ev.tilde ? 0.28 : 0.0) + (ev.mood === 3 && ev.fromEnd === 0 ? 0.35 : 0.0);
+        rd_tr[t] = rd_base + (rd_tail - rd_base) * sTail + 0.18 * edge + (ev.tilde ? 0.28 : 0.0) + (ev.mood === 3 && ev.fromEnd === 0 ? 0.36 : 0.0);
         const afterVL = VOICELESS.has(ev.c);
         const afterSoftC = ev.c === "h" || ev.c === "f";
         const afterGlide = ev.c === "w" || ev.c === "y";
-        const onsetRamp = afterSoftC ? Math.min(1.0, 0.45 + 1.45 * vU) : (afterVL ? Math.min(1.0, 0.66 + 1.40 * vU) : (afterGlide && ev.isPhraseStart ? Math.min(0.92, 0.72 + 0.35 * vU) : Math.min(1.0, 0.90 + 0.30 * vU)));
+        const onsetRamp = afterSoftC ? Math.min(1.0, 0.45 + 1.45 * vU) : (afterVL ? Math.min(1.0, 0.66 + 1.40 * vU) : (afterGlide && ev.isPhraseStart ? Math.min(1.0, 0.90 + 0.25 * vU) : Math.min(1.0, 0.90 + 0.30 * vU)));
         const nucShape = Math.sin(Math.PI * Math.pow(Math.max(0, Math.min(1, vU)), 0.80));
         const moodGain = ev.mood === 2 ? 1.07 : (ev.mood === 3 && ev.fromEnd <= 1 ? (ev.fromEnd === 0 ? 0.72 : 0.86) : 1.0);
         pLung_tr[t] *= softOn * onsetRamp * (0.87 + 0.19 * nucShape) * (V_PLUNG[ev.v] || 1.06) * moodGain;
-        chink_tr[t] = ev.v === "a" ? 0.45 : 0.51;
+        const chinkTgt = ev.v === "a" ? 0.45 : 0.51;
+        const chinkRamp = (bareStart || ev.v === "a") ? minJerk((sec - ev.cEnd) / 0.020) : 1.0;
+        chink_tr[t] = 0.30 + (chinkTgt - 0.30) * chinkRamp;
         if (ev.tilde) chink_tr[t] += 0.06;
+        breathDyn_tr[t] = 0.96 + 0.52 * sTail + 0.22 * edge + (ev.tilde ? 0.22 : 0.0);
         if (longEnd && vU > 0.58) {
-          pLung_tr[t] *= 1.0 - (isVoicedUttEnd ? 0.42 : 0.22) * ((vU - 0.58) / 0.42);
+          pLung_tr[t] *= 1.0 - (isVoicedUttEnd ? 0.42 : 0.22) * minJerk((vU - 0.58) / 0.42);
         }
+      }
+    }
+  }
+  if (nama) {
+    const pgBreath = makePinkGen(seed + 11003, 5, 0.18, fpz);
+    for (let t = 0; t < n; t++) {
+      const pb = pgBreath();
+      if (voicedBool[t]) {
+        const bareShield = 1.0 - bareStart_tr[t];
+        chink_tr[t] = Math.max(0.22, Math.min(0.62, chink_tr[t] + 0.065 * pb * bareShield));
+        breathDyn_tr[t] = Math.max(0.45, Math.min(1.65, breathDyn_tr[t] * (1.0 + 0.28 * pb * bareShield)));
       }
     }
   }
@@ -1542,11 +1836,13 @@ function buildScore(text, opts = {}) {
       for (let j = 28; j < M; j++) A_tr[t][j] = A_tr[t][j] * (1.0 - scv) + 2.15 * scv;
     }
   }
+  const maxConsSm = new Float64Array(n);
   for (const pl of consKeys) {
     const smAmt = smooth1(consAmt[pl], 10);
     const loc = CONS_LOC[pl];
     for (let t = 0; t < n; t++) {
       const a = smAmt[t];
+      if (a > maxConsSm[t]) maxConsSm[t] = a;
       if (a <= 0.005) continue;
       const targetMin = consMinA[pl][t];
       for (let j = 5; j < M; j++) {
@@ -1560,6 +1856,8 @@ function buildScore(text, opts = {}) {
   const voSm = smooth1(Array.from(vo_tr), 12);
   const rdSm = smooth1(Array.from(rd_tr), 26);
   const chinkSm = smooth1(Array.from(chink_tr), 26);
+  const breathDynSm = smooth1(Array.from(breathDyn_tr), 24);
+  const bareStartSm = smooth1(Array.from(bareStart_tr), 10);
   const pLungSm = smooth1(Array.from(pLung_tr), 16);
   {
     const filled = new Int32Array(fricJ_tr);
@@ -1575,31 +1873,55 @@ function buildScore(text, opts = {}) {
     for (let t = 0; t < n; t++) fricJ_tr[t] = filled[t];
   }
   const fricSm = smooth1(Array.from(fric_tr), 46);
-  const sibAlvFricSm = smooth1(smooth1(Array.from(sibAlvFric_tr), 32), 32);
+  const sibAlvFricSm = smooth1(smooth1(Array.from(sibAlvFric_tr), 36), 36);
   const sibPalFricSm = smooth1(smooth1(Array.from(sibPalFric_tr), 36), 36);
-  const vSibAlvSm = smooth1(Array.from(vSibAlv_tr), 16);
-  const vSibPalSm = smooth1(Array.from(vSibPal_tr), 16);
-  const vFricJSm = smooth1(Array.from(vFricJ_tr), 14);
-  const vFricZSm = smooth1(Array.from(vFricZ_tr), 14);
-  const vStopSm = smooth1(Array.from(vStop_tr), 10);
-  const vSeal = smooth1(Array.from(vStop_tr), 10);
-  for (let t = 0; t < n; t++) {
-    const s = Math.max(0.0, 1.0 - vSeal[t]);
-    if (s < 0.999) { vSibPalSm[t] *= s; vSibAlvSm[t] *= s; }
+  const vSibAlvSm = smooth1(smooth1(Array.from(vSibAlv_tr), 16), 16);
+  const vSibPalSm = smooth1(smooth1(Array.from(vSibPal_tr), 16), 16);
+  const vFricJSm = smooth1(Array.from(vFricJ_tr), 18);
+  const vFricZSm = smooth1(Array.from(vFricZ_tr), 18);
+  const vStopSm = smooth1(Array.from(vStop_tr), 14);
+  {
+    let vOpen = 4;
+    for (let t = 0; t < n; t++) {
+      if (vAffrSeal_tr[t] > 0.5) {
+        vOpen = 0;
+        vSibAlvSm[t] = 0.0;
+        vSibPalSm[t] = 0.0;
+      } else if (vOpen < 4) {
+        vOpen++;
+        const s = Math.pow(minJerk(vOpen / 4.0), 0.45);
+        vSibAlvSm[t] *= s;
+        vSibPalSm[t] *= s;
+      }
+    }
   }
   const broadFricSm = smooth1(Array.from(broadFric_tr), 36);
   const glotFricSm = smooth1(Array.from(glotFric_tr), 38);
   const burstSm = smooth1(Array.from(burst_tr), 14);
   const labPopSm = smooth1(Array.from(labPop_tr), 14);
   const stopSm = smooth1(Array.from(stop_tr), 10);
-  const sibSeal = smooth1(Array.from(stop_tr), 22);
-  for (let t = 0; t < n; t++) {
-    const seal = Math.max(0.0, 1.0 - sibSeal[t]);
-    if (seal < 0.999) {
-      sibAlvFricSm[t] *= seal;
+  {
+    const sealFrames = Math.max(5, Math.min(7, Math.round(6.0 * Math.min(1.15, Math.max(0.75, rate)))));
+    let openFrames = sealFrames;
+    for (let t = 0; t < n; t++) {
+      if (affrStop_tr[t] > 0.5) {
+        openFrames = 0;
+        sibAlvFricSm[t] = 0.0;
+        sibPalFricSm[t] = 0.0;
+      } else if (openFrames < sealFrames) {
+        openFrames++;
+        const s = Math.pow(minJerk(openFrames / sealFrames), 0.38);
+        sibAlvFricSm[t] *= s;
+        sibPalFricSm[t] *= s;
+      }
     }
   }
   const sighSm = smooth1(Array.from(sigh_tr), 30);
+  for (let t = 1; t < n; t++) {
+    if (scoop_tr[t] === 0.0 && !voicedBool[t] && scoop_tr[t - 1] > 0.25) {
+      scoop_tr[t] = scoop_tr[t - 1] * 0.96;
+    }
+  }
   const scoopSm = smooth1(Array.from(scoop_tr), 16);
   let f0_fr;
   const morasForRule = events.map(e => ({ t: e.raw, kind: e.kind, c: e.c || "", v: e.v, a: e.a, b: e.cEnd, e: e.e }));
@@ -1624,8 +1946,11 @@ function buildScore(text, opts = {}) {
   }
   {
     const rngF0 = makeRng(seed + 7919);
-    const microSt = new Array(n).fill(0.0);
-    let cf0 = 0.0, mu1 = 0.0, mu2 = 0.0;
+    const pgF0 = makePinkGen(seed + 7919, 5, 0.028, fpz);
+    const cf0OnArr = new Float64Array(n);
+    const cf0ObsArr = new Float64Array(n);
+    const vibArr = new Float64Array(n);
+    let cf0On = 0.0, cf0Obs = 0.0, mu1 = 0.0, mu2 = 0.0, vibPh = 0.4;
     const decay = Math.exp(-fpz / 0.030);
     for (let t = 0; t < n; t++) {
       const vNow = voicedBool[t] ? 1 : 0;
@@ -1634,27 +1959,42 @@ function buildScore(text, opts = {}) {
       const ei = evIdx[t];
       const ev = ei >= 0 ? events[ei] : null;
       if (ev && ev.kind === "CV" && (ev.c === "j" || ev.c === "z") && sec < ev.cEnd) {
-        cf0 = Math.min(cf0, ev.c === "j" ? -2.4 : -1.4);
-      } else if (vNow && !vPrev) {
-        if (ev && ev.isPhraseStart) cf0 = flatHz ? -2.00 : -0.50;
-        else cf0 = (ev && VOICED_OBS.has(ev.c)) ? -1.15 : (flatHz ? 1.80 : 1.25);
+        cf0Obs = cf0Obs * 0.55 + (ev.c === "j" ? -1.5 : -0.6) * 0.45;
+        cf0On *= decay;
       } else {
-        cf0 *= decay;
+        cf0Obs *= decay;
+        if (vNow && !vPrev) {
+          if (ev && ev.isPhraseStart) cf0On = flatHz ? -0.30 : -0.50;
+          else cf0On = (ev && VOICED_OBS.has(ev.c)) ? -1.15 : (flatHz ? 0.35 : 1.25);
+        } else {
+          cf0On *= decay;
+        }
       }
       const g = (rngF0.random() + rngF0.random() + rngF0.random() - 1.5) * 0.82;
       const muNew = 0.80 * mu1 - 0.28 * mu2 + 0.31 * g;
       mu2 = mu1; mu1 = muNew;
+      const pink = pgF0();
       const tailVibW = ev
         ? ((ev.tilde ? 1.0 : 0.0) + (ev.kind === "long" ? 0.65 : 0.0) + ((ev.isUttEnd || (ev.isPhraseEnd && ev.pLen >= 2)) ? 0.75 : 0.0))
         : 0.0;
-      const vibAmp = 0.38 + 0.14 * Math.min(1.0, tailVibW);
+      vibPh += 2.0 * Math.PI * (5.3 + 0.85 * pink) * fpz;
+      const vibAmp = flatHz ? 0.0 : (0.24 + 0.22 * Math.min(1.0, tailVibW));
       const tildeSwell = (ev && ev.tilde) ? 0.65 * Math.sin(Math.PI * Math.max(0, Math.min(1, (sec - ev.a) / Math.max(0.01, ev.e - ev.a)))) : 0.0;
-      const microVib = vibAmp * Math.sin(2 * Math.PI * 5.4 * sec + 0.4) + 1.12 * mu1;
-      const scLift = scoop * scoopSm[t];
-      microSt[t] = cf0 + microVib + scLift + tildeSwell;
+      const hiF0Calm = nama && f0_fr[t] > 432.0 ? Math.min(1.0, (f0_fr[t] - 432.0) / 80.0) : 0.0;
+      const pinkGain = (flatHz ? 0.42 : 0.46) * (1.0 - 0.18 * hiF0Calm);
+      const muGain = flatHz ? 0.55 : (1.32 - 0.26 * hiF0Calm);
+      const microVib = nama
+        ? (vibAmp * Math.sin(vibPh) + pinkGain * pink + muGain * mu1)
+        : ((0.38 + 0.14 * Math.min(1.0, tailVibW)) * Math.sin(2 * Math.PI * 5.4 * sec + 0.4) + 1.38 * mu1);
+      const scLift = (flatHz ? 0.18 : 1.0) * scoop * scoopSm[t];
+      cf0OnArr[t] = cf0On;
+      cf0ObsArr[t] = cf0Obs;
+      vibArr[t] = microVib + scLift + tildeSwell;
     }
-    const smMicro = smooth1(microSt, 6);
-    for (let t = 0; t < n; t++) f0_fr[t] *= Math.pow(2.0, smMicro[t] / 12.0);
+    const cf0ObsSm = taskDyn(cf0ObsArr, 110.0, 1.0, fpz, 0.90);
+    const cf0Sm = new Float64Array(n);
+    for (let t = 0; t < n; t++) cf0Sm[t] = cf0OnArr[t] + cf0ObsSm[t];
+    for (let t = 0; t < n; t++) f0_fr[t] *= Math.pow(2.0, (cf0Sm[t] + vibArr[t]) / 12.0);
   }
   const airTr = new Float64Array(n).fill(1.0);
   let breathExcess = 0.0;
@@ -1692,11 +2032,22 @@ function buildScore(text, opts = {}) {
       airTr[t] = air;
       if (breathExcess > 0.02 && isSp && activeRunSec < softAttackSec) {
         const u = activeRunSec / softAttackSec;
-        onsetEnv[t] = 0.32 + 0.68 * (0.5 - 0.5 * Math.cos(Math.PI * u));
+        const baseOn = 0.32 + 0.68 * minJerk(u);
+        onsetEnv[t] = baseOn + (1.0 - baseOn) * Math.min(1.0, bareStart_tr[t] * 1.4);
       } else {
         onsetEnv[t] = 1.0;
       }
     }
+    const falsRaw = new Float64Array(n);
+    for (let t = 0; t < n; t++) {
+      if (f0_fr[t] > 365.0) {
+        const obsAmt = Math.min(1.0, Math.max(vFricJSm[t], vFricZSm[t], vStopSm[t], stopSm[t] * Math.min(1.0, voSm[t] * 2.5)));
+        const obsKeep = 1.0 - 0.85 * minJerk(obsAmt);
+        const bareHold = 1.0 - 0.72 * bareStart_tr[t];
+        falsRaw[t] = Math.min(1.0, (f0_fr[t] - 365.0) / 125.0) * obsKeep * bareHold;
+      }
+    }
+    const falsSm = smooth1(Array.from(falsRaw), 26);
     for (let t = 0; t < n; t++) {
       const a = airTr[t];
       const lowAir = Math.max(0.0, (0.88 - a) / 0.66);
@@ -1725,8 +2076,8 @@ function buildScore(text, opts = {}) {
         const dropSt = 0.52 * (0.22 + 0.78 * breathExcess) * Math.pow(lowAir, 1.2);
         f0_fr[t] *= Math.pow(2.0, -dropSt / 12.0);
       }
-      if (f0_fr[t] > 365.0 && vFricJSm[t] < 0.15 && vFricZSm[t] < 0.15 && vStopSm[t] < 0.15) {
-        const falsAmt = Math.min(1.0, (f0_fr[t] - 365.0) / 125.0);
+      const falsAmt = falsSm[t];
+      if (falsAmt > 1e-4) {
         rdSm[t] = Math.min(3.7, rdSm[t] + 0.52 * falsAmt);
         chinkSm[t] = Math.min(0.62, chinkSm[t] + 0.11 * falsAmt);
         sighSm[t] = Math.min(1.0, sighSm[t] + 0.14 * falsAmt);
@@ -1768,8 +2119,53 @@ function buildScore(text, opts = {}) {
         }
       }
     }
+    {
+      const refHzEst = flatHz !== null ? flatHz : hz;
+      let scEst = 1.0;
+      if (typeof tractScale === "number" && Number.isFinite(tractScale)) {
+        scEst = Math.max(0.82, Math.min(1.35, tractScale));
+      } else {
+        if (refHzEst < 250.0) scEst = 1.0 + 0.20 * Math.min(1.0, (250.0 - refHzEst) / 115.0);
+        else if (refHzEst > 360.0) scEst = 1.0 - 0.06 * Math.min(1.0, (refHzEst - 360.0) / 100.0);
+        if (effSmile > 0.56) scEst *= 1.0 - 0.025 * Math.min(0.65, effSmile - 0.56);
+        else if (effSmile < 0.56) scEst *= 1.0 + 0.045 * Math.min(0.56, 0.56 - effSmile);
+      }
+      const jawAlphaRaw = new Float64Array(n);
+      let anyJaw = false;
+      for (let t = 0; t < n; t++) {
+        const f0 = f0_fr[t];
+        if (f0 <= 345.0 || voSm[t] <= 0.05) continue;
+        const b = SL_BASIS[vTrack[t]];
+        if (!b || b.modes.length < 2) continue;
+        const estF1 = b.modes[0] / scEst;
+        const targetF1 = 1.22 * f0;
+        if (estF1 >= targetF1) continue;
+        const hiW = minJerk((f0 - 345.0) / 35.0);
+        const wVowel = voSm[t] * Math.max(0.0, 1.0 - maxConsSm[t] * 1.45) * hiW;
+        if (wVowel <= 1e-4) continue;
+        const need = (targetF1 - estF1) / Math.max(200.0, estF1);
+        jawAlphaRaw[t] = Math.min(0.88, need * 2.55) * wVowel;
+        anyJaw = true;
+      }
+      if (anyJaw) {
+        const jawAlphaSm = smooth1(Array.from(jawAlphaRaw), 16);
+        for (let t = 0; t < n; t++) {
+          const cGuard = Math.max(0.0, 1.0 - maxConsSm[t] * 1.70) * Math.min(1.0, voSm[t] * 1.4);
+          const al = jawAlphaSm[t] * cGuard;
+          if (al <= 1e-4) continue;
+          const b = SL_BASIS[vTrack[t]];
+          if (!b) continue;
+          const dJ = b.dJaw;
+          const At = A_tr[t];
+          for (let j = 5; j < M; j++) {
+            const minA = At[j] < 0.22 ? At[j] : 0.22;
+            At[j] = Math.max(minA, Math.min(8.5, At[j] * Math.exp(al * dJ[j])));
+          }
+        }
+      }
+    }
   }
-  return { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, vSibAlvSm, vSibPalSm, vFricJSm, vFricZSm, vStopSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, events, airTr, breathExcess, lowPitchFactor, effSmile };
+  return { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, breathDynSm, bareStartSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, vSibAlvSm, vSibPalSm, vFricJSm, vFricZSm, vStopSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, events, airTr, breathExcess, lowPitchFactor, effSmile };
 }
 function applyAntiAliasLpf(buf, srIn, cutoffHz) {
   const w0 = 2.0 * Math.PI * cutoffHz / srIn;
@@ -1796,33 +2192,43 @@ function synthKuda(text, opts = {}) {
   const presetObj = KUDA_PRESETS[opts.preset || "kawaii"] || KUDA_PRESETS.kawaii;
   const merged = Object.assign({}, presetObj, opts);
   const {
-    seed = 2024,
+    seed: rawSeed = 2024,
     asp = 0.049,
     aspMid = 0.200,
     bernS = 4.10,
-    srOut = 24000,
-    hz = 302.0,
+    srOut: rawSrOut = 24000,
+    hz: rawHz = 302.0,
     nama = true,
     tractScale = "auto",
+    hopf: rawHopf = 0.55,
   } = merged;
+  const seed = Number.isFinite(rawSeed) ? rawSeed : 2024;
+  const srOut = Number.isFinite(rawSrOut) ? Math.max(8000, Math.min(96000, rawSrOut)) : 24000;
+  const hz = Number.isFinite(rawHz) ? Math.max(60.0, Math.min(800.0, rawHz)) : 302.0;
+  const hopfAmt = nama && Number.isFinite(rawHopf) ? Math.max(0.0, Math.min(1.2, rawHopf)) : 0.0;
   const sc = buildScore(text, merged);
-  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, vSibAlvSm, vSibPalSm, vFricJSm, vFricZSm, vStopSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, airTr, breathExcess, lowPitchFactor, effSmile } = sc;
+  const { n, fpz, A_tr, velSm, voSm, rdSm, chinkSm, breathDynSm, bareStartSm, pLungSm, fricSm, sibAlvFricSm, sibPalFricSm, vSibAlvSm, vSibPalSm, vFricJSm, vFricZSm, vStopSm, broadFricSm, glotFricSm, burstSm, labPopSm, fricJ_tr, stopSm, sighSm, f0_fr, voicedBool, airTr, breathExcess, lowPitchFactor, effSmile } = sc;
+  const refHz = (typeof merged.flatHz === "number" && Number.isFinite(merged.flatHz) && merged.flatHz > 0)
+    ? Math.max(60.0, Math.min(800.0, merged.flatHz))
+    : hz;
   let effTractScale = 1.0;
   if (nama) {
     if (typeof tractScale === "number" && Number.isFinite(tractScale)) {
       effTractScale = Math.max(0.82, Math.min(1.35, tractScale));
     } else {
-      const refHz = (typeof merged.flatHz === "number" && merged.flatHz > 0) ? merged.flatHz : hz;
       if (refHz < 250.0) effTractScale = 1.0 + 0.20 * Math.min(1.0, (250.0 - refHz) / 115.0);
       else if (refHz > 360.0) effTractScale = 1.0 - 0.06 * Math.min(1.0, (refHz - 360.0) / 100.0);
-      if (effSmile > 0.65) {
-        effTractScale *= 1.0 - 0.045 * Math.min(0.60, effSmile - 0.65);
+      if (effSmile > 0.56) {
+        effTractScale *= 1.0 - 0.025 * Math.min(0.65, effSmile - 0.56);
+      } else if (effSmile < 0.56) {
+        effTractScale *= 1.0 + 0.045 * Math.min(0.56, 0.56 - effSmile);
       }
     }
   }
   const srWg = SR / effTractScale;
   const N = Math.max(1, Math.trunc(n * fpz * srWg));
   const rng = makeRng(seed);
+  const rngHopf = makeRng(seed + 31337);
   const effAsp = nama ? asp * (1.0 - 0.35 * breathExcess * lowPitchFactor) : asp;
   const effAspMid = nama ? aspMid * (1.0 - 0.52 * breathExcess * lowPitchFactor) : aspMid;
   const R = new Float64Array(M), L = new Float64Array(M);
@@ -1839,6 +2245,7 @@ function synthKuda(text, opts = {}) {
   const k = new Float64Array(M - 1);
   const rawOut = new Float32Array(N);
   let ph = 0.0, lpRet1 = 0.0, lpRet2 = 0.0;
+  let hopfR = 0.0, hopfXi = 0.0;
   let cycJit = 0.0, cycShim = 0.0, cycMuc = 0.0, cycTp = 0.0, cycParity = 1.0;
   let radLipState = 0.0, radNosState = 0.0, viscLp1 = 0.0, viscLp2 = 0.0;
   let hp1 = 0.0, hp2 = 0.0, lpA1 = 0.0, lpA2 = 0.0, wPrev = 0.0, hp1Prev = 0.0;
@@ -1846,12 +2253,12 @@ function synthKuda(text, opts = {}) {
   let pOral = 0.0;
   let sH1 = 0.0, sH2 = 0.0, sH3 = 0.0, sW0 = 0.0, sW1 = 0.0, sW2 = 0.0, sL1 = 0.0, sL2 = 0.0;
   let pH1 = 0.0, pH2 = 0.0, pH3 = 0.0, pW0 = 0.0, pW1 = 0.0, pW2 = 0.0, pL1 = 0.0, pL2 = 0.0;
-  let bHp = 0.0, bWPrev = 0.0, bLp1 = 0.0, bLp2 = 0.0;
+  let bHp = 0.0, bWPrev = 0.0, bLp1 = 0.0, bLp2 = 0.0, bLp3 = 0.0;
   let wallLp1 = 0.0, wallLp2 = 0.0, vWall1 = 0.0, vWall2 = 0.0;
   let roomLp1 = 0.0, roomLp2 = 0.0;
   const wallLoss = 0.9980;
   const cheekLoss = 0.9970;
-  const epiLoss = 0.9982;
+  const epiLoss = 0.9972;
   const nasalLoss = 0.9920;
   const wgSR = 2 * srWg;
   const frameStepSamples = fpz * srWg;
@@ -1867,6 +2274,8 @@ function synthKuda(text, opts = {}) {
     const vo = voSm[f0Idx] + (voSm[f1Idx] - voSm[f0Idx]) * frac;
     const rd = rdSm[f0Idx] + (rdSm[f1Idx] - rdSm[f0Idx]) * frac;
     const chinkAmp = chinkSm[f0Idx] + (chinkSm[f1Idx] - chinkSm[f0Idx]) * frac;
+    const breathDyn = breathDynSm[f0Idx] + (breathDynSm[f1Idx] - breathDynSm[f0Idx]) * frac;
+    const bareHold = bareStartSm[f0Idx] + (bareStartSm[f1Idx] - bareStartSm[f0Idx]) * frac;
     const pLung = pLungSm[f0Idx] + (pLungSm[f1Idx] - pLungSm[f0Idx]) * frac;
     const velA = velSm[f0Idx] + (velSm[f1Idx] - velSm[f0Idx]) * frac;
     const sibAlvF = sibAlvFricSm[f0Idx] + (sibAlvFricSm[f1Idx] - sibAlvFricSm[f0Idx]) * frac;
@@ -1885,26 +2294,81 @@ function synthKuda(text, opts = {}) {
     const fJ = fricJ_tr[f0Idx];
     pOral = pOral * (1.0 - 0.008 * stopW - 0.025 * (1.0 - stopW)) + 0.008 * stopW * Math.min(1.0, pLung);
     const burstDrive = burst * 0.48 + (1.0 - stopW) * pOral * 0.06;
-    const oq = Math.max(0.66, Math.min(0.86, 0.49 + 0.16 * rd));
-    const rkp = Math.max(0.32, Math.min(0.55, (22.0 + 13.0 * rd) * 0.01));
+    const fryAmt = nama && f0 < 175.0 ? Math.min(1.0, (175.0 - f0) / 75.0) : 0.0;
+    const hiReg = nama && refHz > 355.0 ? Math.min(1.0, (refHz - 355.0) / 60.0) : 0.0;
+    const hiF0 = nama && f0 > 390.0 ? Math.min(1.0, (f0 - 390.0) / 90.0) : 0.0;
+    const hiDamp = Math.max(hiReg, hiF0);
+    const tailSigh = Math.max(0.0, sigh - 0.16 * hiDamp);
+    const tailAct = Math.min(1.0, tailSigh * 1.15 + 0.30 * breathExcess * Math.max(0.0, (rd - 2.00) / 1.2));
+    const tailBif = Math.max(0.0, (tailAct - 0.30) / 0.70);
+    const hiReg4 = hiReg > 0.0 ? hiDamp : 0.0;
+    const rdEff = Math.max(1.0, rd - 0.03 * hiReg4);
+    const oq = Math.max(0.66, Math.min(0.86, 0.49 + 0.16 * rdEff));
+    const rkp = Math.max(0.32, Math.min(0.55, (22.0 + 13.0 * rdEff) * 0.01));
     const tp = Math.max(0.28, Math.min(oq - 0.08, (oq / (1.0 + rkp)) * (1.0 + 0.11 * cycTp)));
     const te = oq;
-    const ta1 = Math.max(0.0086, Math.min(0.046, (0.0094 + 0.0092 * Math.max(0, rd - 1.1) + 0.022 * sigh) * (1.0 + 0.36 * cycMuc)));
+    const vFricBack = Math.max(vFricJW, vFricZW);
+    const obsBackP = Math.max(vFricBack, vStopW);
+    const ta1 = Math.max(0.0086, Math.min(0.054, (0.0094 + 0.0092 * Math.max(0, rdEff - 1.1) + 0.022 * sigh + 0.020 * vFricBack + 0.004 * vStopW) * (1.0 + 0.36 * cycMuc)));
     const ta2 = 0.0049;
     const lipArea = Math.max(0.015, A[M - 1]);
     const aLip = Math.sqrt(lipArea / Math.PI);
-    const fRad = Math.min(18000.0, 4100.0 / Math.max(0.24, aLip));
+    const vlSibMask = Math.min(1.0, sibAlvF + sibPalF);
+    const fRad = Math.min(18000.0, (4100.0 - 2050.0 * hiDamp * (1.0 - 0.40 * vlSibMask)) / Math.max(0.24, aLip));
     const lipGain = Math.sqrt(lipArea / 3.0);
     const aR = Math.exp(-2.0 * Math.PI * fRad / wgSR);
     const aNos = Math.exp(-2.0 * Math.PI * 5600.0 / wgSR);
     const acSinus = 0.18;
     const velGate = Math.min(1.0, velA / 0.12);
-    const fryAmt = nama && f0 < 175.0 ? Math.min(1.0, (175.0 - f0) / 75.0) : 0.0;
+    const effBernS = (bernS - 0.05 * hiReg4) * (1.0 - 0.14 * hiDamp) * (1.0 - 0.50 * vFricBack - 0.22 * vStopW);
+    const effVo = vo;
+    const drive = effVo * pLung;
     let sampleOut = 0.0;
     for (let sub = 0; sub < 2; sub++) {
-      const jitScale = 1.0 + 0.45 * fryAmt;
+      const pLoad = Math.tanh(L[0] * 1.3);
+      let hopfAmp = drive;
+      let hopfDetune = 0.0;
+      let hopfChinkAdd = 0.0;
+      let hopfBreathAdd = 0.0;
+      let hopfAirTail = 0.0;
+      let hopfFluct = 0.0;
+      if (hopfAmt > 1e-4) {
+        hopfXi = 0.985 * hopfXi + 0.015 * (rngHopf.random() + rngHopf.random() - 1.0) * 6.0;
+        const abductBif = rdEff > 2.48 ? Math.min(1.0, (rdEff - 2.48) / 0.14) : 0.0;
+        const hopfEff = hopfAmt;
+        const pTh = hopfEff * (1.0 - 0.50 * hiDamp) * ((0.40 - 0.07 * abductBif) * tailBif + (0.12 - 0.02 * abductBif) * Math.max(0.0, rdEff - 2.00) * tailAct);
+        const mu = drive * drive - pTh;
+        const muPos = mu > 0.0 ? mu : 0.0;
+        const muNeg = mu < 0.0 ? -mu : 0.0;
+        const superBoost = Math.max(0.0, 1.0 - tailBif * 10.0);
+        const whLow = 260.0 * (1.0 - 0.55 * tailBif) + 940.0 * superBoost;
+        const whHi = 1400.0 * (1.0 - 0.82 * tailBif);
+        const hiW = Math.min(1.0, hiReg4 * 1.5);
+        const wh = whLow * (1.0 - hiW) + whHi * hiW;
+        const dtWh = wh / wgSR;
+        const rSeed = (tailBif < 0.05 && drive > 0.005) ? 0.012 * drive : 0.0;
+        hopfR = Math.max(0.0, Math.min(1.35,
+          (hopfR + dtWh * (muPos * hopfR + rSeed + 0.030 * hopfXi * (0.15 + hopfR) * (0.20 + 0.80 * tailAct) + 0.014 * pLoad * hopfR))
+          / (1.0 + dtWh * (muNeg + hopfR * hopfR))
+        ));
+        const obsShield = 1.0 - Math.min(1.0, obsBackP);
+        const hiCoreW = 0.12 * hiReg4;
+        const hopfW = Math.min(1.0, hopfEff * (hiCoreW + (1.0 - hiCoreW) * tailBif) * (1.0 - bareHold) * obsShield * (1.0 - 0.45 * hiDamp));
+        hopfAmp = (1.0 - hopfW) * drive + hopfW * hopfR;
+        const diss = hopfW * Math.max(0.0, drive - hopfR);
+        hopfFluct = hopfEff * tailAct * obsShield;
+        hopfDetune = Math.max(-0.035, Math.min(0.035,
+          hopfEff * Math.max(tailAct, 0.35 * hiReg4) * obsShield * (0.012 * (hopfR * hopfR - muPos) + 0.012 * pLoad + 0.028 * hopfXi)
+        ));
+        const deepThr = 0.30 - 0.05 * abductBif;
+        const deepTail = tailBif > deepThr ? (tailBif - deepThr) / (1.0 - deepThr) : 0.0;
+        hopfChinkAdd = Math.min(0.18, hopfEff * obsShield * (0.20 * diss * (1.0 - (0.80 + 0.05 * abductBif) * deepTail) + 0.08 * tailBif * (1.0 - deepTail) * Math.max(0.0, 0.75 - hopfR)));
+        hopfBreathAdd = hopfEff * obsShield * (3.4 * diss + 1.45 * tailBif * Math.max(0.0, 1.0 - hopfR / (drive + 0.08)));
+        hopfAirTail = deepTail > 0.0 ? hopfEff * obsShield * deepTail * ((3.6 + 0.6 * abductBif) * diss + (1.80 + 0.30 * abductBif) * tailBif * Math.max(0.0, 1.0 - hopfR / (drive + 0.08))) : 0.0;
+      }
+      const jitScale = (1.0 + 0.45 * fryAmt) * (1.0 + 1.85 * hopfFluct);
       const fryPer = 1.0 + 0.028 * fryAmt * cycParity;
-      const periodTicks = (wgSR / Math.max(70.0, f0 * (1.0 + 0.017 * jitScale * cycJit))) * fryPer;
+      const periodTicks = (wgSR / Math.max(70.0, f0 * (1.0 + 0.020 * jitScale * cycJit + hopfDetune))) * fryPer;
       ph += 1.0 / periodTicks;
       if (ph >= 1.0) {
         ph -= 1.0;
@@ -1924,18 +2388,18 @@ function synthKuda(text, opts = {}) {
           bern = 0.5 * (1.0 - Math.cos(Math.PI * ph / tp));
         } else {
           const u = (ph - tp) / Math.max(1e-6, te - tp);
-          bern = 1.0 - Math.pow(u, bernS);
+          bern = 1.0 - Math.pow(u, effBernS);
         }
-        const chink = chinkAmp * Math.sin(Math.PI * ph / te);
+        const chink = (chinkAmp + hopfChinkAdd) * Math.sin(Math.PI * ph / te);
         gp = bern + chink;
       }
       const aTa1 = Math.exp(-1.0 / (ta1 * periodTicks));
       const aTa2 = Math.exp(-1.0 / (ta2 * periodTicks));
       lpRet1 = (1.0 - aTa1) * gp + aTa1 * lpRet1;
       lpRet2 = (1.0 - aTa2) * lpRet1 + aTa2 * lpRet2;
-      const pLoad = Math.tanh(L[0] * 1.3);
       const fryAmp = 1.0 + 0.075 * fryAmt * cycParity;
-      const uGlot = vo * pLung * (1.0 + cycShim) * fryAmp * lpRet2 * (1.0 - 0.08 * pLoad);
+      const shimScale = 1.0 + 1.50 * hopfFluct;
+      const uGlot = hopfAmp * (1.0 + cycShim * shimScale) * fryAmp * lpRet2 * (1.0 - 0.08 * pLoad);
       const w = rng.uniform(-1.0, 1.0);
       const h1 = 0.72 * (hp1 + w - wPrev); wPrev = w; hp1 = h1;
       const h2 = 0.72 * (hp2 + h1 - hp1Prev); hp1Prev = h1; hp2 = h2;
@@ -1947,10 +2411,16 @@ function synthKuda(text, opts = {}) {
       mLp2 = 0.14 * mLp1 + 0.86 * mLp2;
       mLp3 = 0.14 * mLp2 + 0.86 * mLp3;
       const openMod = 0.26 + 0.74 * Math.min(1.4, lpRet2);
-      const breathMult = 1.0 + 2.1 * sigh + 0.34 * Math.max(0, rd - 1.45);
+      const breathMultRaw = (1.0 + 2.1 * sigh + 0.34 * Math.max(0, rd - 1.45) + hopfBreathAdd) * breathDyn;
+      const breathMult = breathExcess > 0.35
+        ? (1.0 + 2.2 * Math.tanh(Math.max(0.0, breathMultRaw - 1.0) / 2.2))
+        : breathMultRaw;
       const glotH = (1.0 - vo) * glotF * 1.50 * (0.72 * mLp3 + 0.28 * lpA2);
-      const glotJet = (vo * pLung * openMod * breathMult * (effAsp * lpA2 * 0.44 + effAspMid * mLp3 * 0.78) + glotH);
-      const rg = 0.920 - 0.130 * vo * Math.min(1.2, lpRet2);
+      const airAbduct = rdEff > 2.48 ? Math.min(1.0, (rdEff - 2.48) / 0.14) : 0.0;
+      const h2Mix = 0.16 + 0.49 * airAbduct;
+      const hopfAir = vo * pLung * hopfAirTail * Math.min(0.055, effAsp) * (1.0 - 0.35 * hiDamp) * ((1.0 - h2Mix) * lpA2 + h2Mix * h2) * (3.4 + 0.4 * airAbduct);
+      const glotJet = (vo * pLung * openMod * breathMult * (effAsp * (1.0 - 0.55 * hiDamp) * lpA2 * 0.44 + effAspMid * (1.0 - 0.22 * hiDamp) * mLp3 * 0.78) + hopfAir + glotH);
+      const rg = (0.920 - 0.05 * hiDamp) - 0.130 * vo * Math.min(1.2, lpRet2);
       Rn[0] = (uGlot + glotJet) + rg * L[0];
       const tw = rng.uniform(-1.0, 1.0);
       const sy1 = 0.67 * (sH1 + tw - sW0); sW0 = tw; sH1 = sy1;
@@ -1966,14 +2436,18 @@ function synthKuda(text, opts = {}) {
       const bh = 0.94 * (bHp + tw - bWPrev); bWPrev = tw; bHp = bh;
       bLp1 = 0.11 * bh + 0.89 * bLp1;
       bLp2 = 0.15 * bLp1 + 0.85 * bLp2;
-      const voicedFricMod = 1.0 - 0.36 * vo + 0.96 * vo * Math.min(1.4, lpRet2);
-      const sibDip = 0.50 * (sibAlvF * (sL2 * 1.22) + sibPalF * (pL2 * 1.28) + voicedFricMod * (vSibAlvF * (sL2 * 1.22) + vSibPalF * (pL2 * 1.28)));
-      const burstNoise = (fJ === 27) ? (bLp2 * 0.88 + pL2 * 0.24 + sL2 * 0.14) : (bLp2 * 1.22);
+      bLp3 = 0.055 * bLp2 + 0.945 * bLp3;
+      const voicedFricMod = 1.0;
+      const sibDip = 0.50 * (sibAlvF * (sL2 * 1.08) + sibPalF * (pL2 * 1.26) + voicedFricMod * (vSibAlvF * (sL2 * 0.74) + vSibPalF * (pL2 * 0.90)));
+      const burstNoise = (fJ === 27)
+        ? (bLp2 * 0.88 + pL2 * 0.24 + sL2 * 0.14)
+        : (fJ === 26 ? (bLp3 * 2.1 + bLp2 * 0.22) : (bLp2 * 1.22));
       const brdDip = 0.50 * (broadF * (bLp2 * 1.85) + burstDrive * burstNoise);
       const turbDipole = (fJ > 4) ? (sibDip + brdDip) : 0.0;
       const fwdFrac = (sibAlvF + sibPalF + vSibAlvF + vSibPalF) > 0.15 ? 0.95 : 0.72;
+      const epiHiDrop = 0.008 * hiDamp;
       for (let j = 0; j < M - 1; j++) {
-        const wL = j <= 3 ? epiLoss : (j >= 10 && j <= 24 ? cheekLoss : wallLoss);
+        const wL = j <= 3 ? (epiLoss - epiHiDrop) : (j >= 10 && j <= 24 ? cheekLoss : wallLoss);
         if (j === PIR_J) {
           const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
           const pa = R[j], pb = L[j + 1], pc = pL[0];
@@ -2029,12 +2503,15 @@ function synthKuda(text, opts = {}) {
       Ln[M - 1] = pRefl;
       const pRadLip = (pInc + pRefl) * lipGain + labPop * bLp2 * 0.30;
       const pPhar = 0.5 * (R[5] + L[5]);
-      wallLp1 = 0.020 * pPhar + 0.980 * wallLp1;
-      wallLp2 = 0.020 * wallLp1 + 0.980 * wallLp2;
+      wallLp1 = 0.034 * pPhar + 0.966 * wallLp1;
+      wallLp2 = 0.034 * wallLp1 + 0.966 * wallLp2;
       vWall1 = 0.052 * pPhar + 0.948 * vWall1;
       vWall2 = 0.052 * vWall1 + 0.948 * vWall2;
-      const pWall = Math.max(0.0, stopW - vStopW) * vo * wallLp2 * 0.048
-        + (vStopW * 0.030 + vFricJW * 0.030 + vFricZW * 0.014) * vo * vWall2;
+      const wallPitchScale = Math.min(2.4, Math.max(0.24, Math.pow(f0 / 255.0, 1.55)));
+      const wallRadG = 0.048 * wallPitchScale;
+      const vSibWallScale = Math.min(1.35, wallPitchScale);
+      const pWall = Math.max(0.0, stopW - vStopW) * vo * wallLp2 * wallRadG
+        + (vStopW * 0.014 + vFricJW * 0.014 + vFricZW * 0.022 * vSibWallScale) * effVo * vWall2;
       for (let j = 0; j < M; j++) { R[j] = Rn[j]; L[j] = Ln[j]; }
       for (let q = 0; q < MN; q++) { nR[q] = nRn[q]; nL[q] = nLn[q]; }
       const pTot = pRadLip + pRadNos + pWall;

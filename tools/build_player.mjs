@@ -9,9 +9,9 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1.4-kawaii";
-const PLAYER_REV = "v0.1.4-kawaii";
-const VERSION_NOTE = "かわいさ全盛り(kawaii)：後部声門間隙×スナップ閉鎖＋記号演技(！〜…っ)＋ささやき＋高音「ツ/ジ」調音修正";
+const VERSION = "v0.1.5-kawaii";
+const PLAYER_REV = "v0.1.5-kawaii";
+const VERSION_NOTE = "かわいさ純物理5大数学フル搭載(Sturm-Liouville直交射影×Hopf分岐×最小躍度/Task Dynamics×1/fゆらぎ×高音F1-F0追従)＋ざじずぜぞ/あじ/ヘルツ/ち完全修正";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
