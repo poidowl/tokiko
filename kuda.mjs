@@ -40,9 +40,110 @@ export function makeRng(seed) {
   return { random, uniform: (lo, hi) => lo + (hi - lo) * random() };
 }
 
+const ROMA3 = {
+  sha: "シャ", shi: "シ", shu: "シュ", she: "シェ", sho: "ショ",
+  cha: "チャ", chi: "チ", chu: "チュ", che: "チェ", cho: "チョ",
+  tsu: "ツ", tsa: "ツァ", tsi: "ツィ", tse: "ツェ", tso: "ツォ",
+  kya: "キャ", kyi: "キ", kyu: "キュ", kye: "キェ", kyo: "キョ",
+  gya: "ギャ", gyi: "ギ", gyu: "ギュ", gye: "ギェ", gyo: "ギョ",
+  sya: "シャ", syi: "シ", syu: "シュ", sye: "シェ", syo: "ショ",
+  zya: "ジャ", zyi: "ジ", zyu: "ジュ", zye: "ジェ", zyo: "ジョ",
+  jya: "ジャ", jyi: "ジ", jyu: "ジュ", jye: "ジェ", jyo: "ジョ",
+  tya: "チャ", tyi: "チ", tyu: "チュ", tye: "チェ", tyo: "チョ",
+  cya: "チャ", cyi: "チ", cyu: "チュ", cye: "チェ", cyo: "チョ",
+  dya: "ヂャ", dyi: "ヂ", dyu: "ヂュ", dye: "ヂェ", dyo: "ヂョ",
+  nya: "ニャ", nyi: "ニ", nyu: "ニュ", nye: "ニェ", nyo: "ニョ",
+  hya: "ヒャ", hyi: "ヒ", hyu: "ヒュ", hye: "ヒェ", hyo: "ヒョ",
+  bya: "ビャ", byi: "ビ", byu: "ビュ", bye: "ビェ", byo: "ビョ",
+  pya: "ピャ", pyi: "ピ", pyu: "ピュ", pye: "ピェ", pyo: "ピョ",
+  mya: "ミャ", myi: "ミ", myu: "ミュ", mye: "ミェ", myo: "ミョ",
+  rya: "リャ", ryi: "リ", ryu: "リュ", rye: "リェ", ryo: "リョ",
+  fya: "フャ", fyu: "フュ", fyo: "フョ", vya: "ヴャ", vyu: "ヴュ", vyo: "ヴョ",
+  pha: "ファ", phi: "フィ", phu: "フ", phe: "フェ", pho: "フォ", phy: "フィ",
+  thi: "ティ", dhi: "ディ", twu: "トゥ", dwu: "ドゥ", dzu: "ヅ", dzi: "ヂ",
+  tha: "サ", thu: "ス", the: "ゼ", tho: "ソ",
+  wha: "ワ", whi: "ウィ", whu: "ウ", whe: "ウェ", who: "ウォ",
+  kwa: "クァ", gwa: "グァ", xtu: "ッ", xya: "ャ", xyu: "ュ", xyo: "ョ",
+};
+const ROMA2 = {
+  ka: "カ", ki: "キ", ku: "ク", ke: "ケ", ko: "コ",
+  sa: "サ", si: "シ", su: "ス", se: "セ", so: "ソ",
+  ta: "タ", ti: "チ", tu: "ツ", te: "テ", to: "ト",
+  na: "ナ", ni: "ニ", nu: "ヌ", ne: "ネ", no: "ノ",
+  ha: "ハ", hi: "ヒ", hu: "フ", he: "ヘ", ho: "ホ",
+  ma: "マ", mi: "ミ", mu: "ム", me: "メ", mo: "モ",
+  ya: "ヤ", yi: "イ", yu: "ユ", ye: "イェ", yo: "ヨ",
+  ra: "ラ", ri: "リ", ru: "ル", re: "レ", ro: "ロ",
+  wa: "ワ", wi: "ウィ", wu: "ウ", we: "ウェ", wo: "ヲ",
+  ga: "ガ", gi: "ギ", gu: "グ", ge: "ゲ", go: "ゴ",
+  za: "ザ", zi: "ジ", zu: "ズ", ze: "ゼ", zo: "ゾ",
+  da: "ダ", di: "ヂ", du: "ヅ", de: "デ", do: "ド",
+  ba: "バ", bi: "ビ", bu: "ブ", be: "ベ", bo: "ボ",
+  pa: "パ", pi: "ピ", pu: "プ", pe: "ペ", po: "ポ",
+  ja: "ジャ", ji: "ジ", ju: "ジュ", je: "ジェ", jo: "ジョ",
+  fa: "ファ", fi: "フィ", fu: "フ", fe: "フェ", fo: "フォ",
+  va: "ヴァ", vi: "ヴィ", vu: "ヴ", ve: "ヴェ", vo: "ヴォ",
+  ca: "カ", ci: "シ", cu: "ク", ce: "セ", co: "コ",
+  qa: "クァ", qi: "クィ", qu: "ク", qe: "クェ", qo: "クォ",
+  xa: "ァ", xi: "ィ", xu: "ゥ", xe: "ェ", xo: "ォ",
+};
+const ROMA1 = { a: "ア", i: "イ", u: "ウ", e: "エ", o: "オ" };
+const CONS_FB = {
+  t: "ト", d: "ド", k: "ク", c: "ク", g: "グ", s: "ス", z: "ズ",
+  p: "プ", b: "ブ", v: "ブ", f: "フ", m: "ム", r: "ル", j: "ジ",
+  w: "ウ", y: "イ", q: "ク", x: "クス",
+};
+const MACRON = { ā: "a-", ī: "i-", ū: "u-", ē: "e-", ō: "o-", â: "a-", î: "i-", û: "u-", ê: "e-", ô: "o-" };
+
+export function romajiToKata(s) {
+  let str = String(s || "");
+  if (!/[A-Za-z-āīūēōĀĪŪĒŌâîûêôÂÎÛÊÔ]/.test(str)) return str;
+  if (/[āīūēōĀĪŪĒŌâîûêôÂÎÛÊÔ]/.test(str)) str = str.replace(/[āīūēōĀĪŪĒŌâîûêôÂÎÛÊÔ]/g, (c) => MACRON[c.toLowerCase()] || c);
+  const low = str.toLowerCase().replace(/l/g, "r");
+  let out = "", i = 0;
+  const n = str.length;
+  while (i < n) {
+    const ch = low[i];
+    if (ch < "a" || ch > "z") {
+      if (ch === "-" && out.length && !/[、。，．,.!！?？… 　/|]/.test(out[out.length - 1])) out += "ー";
+      else out += str[i];
+      i++;
+      continue;
+    }
+    if (low.startsWith("xtsu", i)) { out += "ッ"; i += 4; continue; }
+    if (ch === "n") {
+      const nx = low[i + 1] || "", nx2 = low[i + 2] || "";
+      if (nx === "n") { out += "ン"; i += /[aiueoy]/.test(nx2) ? 1 : 2; continue; }
+      if ((nx === "'" || nx === "’") && /[aiueoy]/.test(nx2)) { out += "ン"; i += 2; continue; }
+      if (!/[aiueoy]/.test(nx)) { out += "ン"; i++; continue; }
+    }
+    if (ch === "m" && (low[i + 1] === "b" || low[i + 1] === "p")) { out += "ン"; i++; continue; }
+    if (low.startsWith("tch", i) || low.startsWith("ck", i)) { out += "ッ"; i++; continue; }
+    if (ch === low[i + 1] && !/[aiueon]/.test(ch)) {
+      if (ch === "r" || ch === "h" || ch === "w" || ch === "y") { i++; continue; }
+      out += "ッ"; i++; continue;
+    }
+    const s3 = low.slice(i, i + 3);
+    if (ROMA3[s3]) { out += ROMA3[s3]; i += 3; continue; }
+    const s2 = low.slice(i, i + 2);
+    if (ROMA2[s2]) { out += ROMA2[s2]; i += 2; continue; }
+    if (ROMA1[ch]) { out += ROMA1[ch]; i++; continue; }
+    if (s2 === "ch") { out += "チ"; i += 2; continue; }
+    if (s2 === "sh") { out += "シュ"; i += 2; continue; }
+    if (s2 === "ts") { out += "ツ"; i += 2; continue; }
+    if (s2 === "th") { out += "ス"; i += 2; continue; }
+    if (s2 === "ph") { out += "フ"; i += 2; continue; }
+    if (ch === "h") { out += (out.length && /[ァ-ヶ]$/.test(out)) ? "ー" : "フ"; i++; continue; }
+    if (CONS_FB[ch]) { out += CONS_FB[ch]; i++; continue; }
+    i++;
+  }
+  return out;
+}
+
 export function toKata(s) {
+  const src = romajiToKata(s);
   let out = "";
-  for (const ch of String(s || "")) {
+  for (const ch of src) {
     const code = ch.codePointAt(0);
     out += (code >= 0x3041 && code <= 0x3096) ? String.fromCodePoint(code + 0x60) : ch;
   }
@@ -160,7 +261,7 @@ function splitMarked(text) {
       else if (out.length && out[out.length - 1] !== "、" && out[out.length - 1] !== "?") out.push("、");
     } else if (SMALL[ch] && out.length && !["、", "ッ", "ン", "ー", "'", "/"].includes(out[out.length - 1])) {
       out[out.length - 1] += ch;
-    } else {
+    } else if (K2V[ch] || ch === "ッ" || ch === "ン" || ch === "ー" || ch === "#") {
       out.push(ch);
     }
   }
@@ -408,7 +509,7 @@ function decodeMora(m) {
       if (PALC[c0]) return { kind: "CV", c: PALC[c0], v, pal: false };
       return { kind: "CV", c: c0, v, pal: true };
     }
-    return { kind: "CV", c: c0 || "w", v, pal: false };
+    return { kind: "CV", c: c0 || (m[0] === "イ" ? "y" : "w"), v, pal: false };
   }
   const [c, v] = K2V[m] || ["", "a"];
   return { kind: "CV", c, v, pal: false };

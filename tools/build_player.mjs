@@ -9,9 +9,9 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1.1";
-const PLAYER_REV = "v0.1.1a";
-const VERSION_NOTE = "4次ゼロリンギングLPF(24dB/oct)で高域折り返し低減・buildScore O(N)化（Train Worst 28.9% / uncanny 35.8）";
+const VERSION = "v0.1.2";
+const PLAYER_REV = "v0.1.2";
+const VERSION_NOTE = "ローマ字・英字入力対応 (konnichiwa / JavaScript等) ＋ 開けた瞬間自動発話 ＋ 息もれ/倍速(0.5x–2.0x)スライダ";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
@@ -393,7 +393,7 @@ const playerHtml = `<!DOCTYPE html>
   </div>
 
   <div class="input-row">
-    <input id="kanaInput" class="kana-input" type="text" value="ジャバスクリプトで、しゃべってまーす！" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ）">
+    <input id="kanaInput" class="kana-input" type="text" value="ジャバスクリプトで、しゃべってまーす！" placeholder="かな / Romaji OK (e.g. konnichiwa!)" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ・ローマ字）">
     <button id="playBtn" class="play-btn" type="button">▶ しゃべる</button>
   </div>
 

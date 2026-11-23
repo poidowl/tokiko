@@ -2,7 +2,7 @@
 
 **Virtual Vocal Organ — KUDA (`kuda.mjs`)**
 
-学習済み重み 0 バイト・外部依存 0・静的 `import` 0 の、単一ファイル純 JavaScript（約 61 KB）による **4 分岐ケリー・ロックバウム物理声道管** 日本語音声合成エンジンです。
+学習済み重み 0 バイト・外部依存 0・静的 `import` 0 の、単一ファイル純 JavaScript（約 68 KB）による **4 分岐ケリー・ロックバウム物理声道管** 日本語音声合成エンジンです。
 
 Node.js / ブラウザの両方でそのまま動作し、発声器官の全ソースコードをローカル LLM のコンテキストに丸ごと収容できるサイズに保っています。
 
@@ -27,6 +27,7 @@ Node.js / ブラウザの両方でそのまま動作し、発声器官の全ソ�
 
 ```bash
 node kuda.mjs -o out.wav "わたし、にほんご、ちょっとしゃべれます"
+node kuda.mjs -o romaji.wav "konnichiwa, sekai! JavaScript de shabette ma-su!"
 node kuda.mjs --preset genki -o genki.wav "しじゅほ'ーしょー、げ'っと/す'っぞ！"
 node kuda.mjs --preset amae --sr 44100 -o amae.wav "おはよう、きょうは、いいてんきだね"
 ```
@@ -43,7 +44,7 @@ const { wav, samples, sr } = synthKuda("だいじょうぶ、きっと、うま�
 });
 ```
 
-入力テキストはひらがな・カタカナを受け付けます。`'` でアクセント核、`/` で句境界、読点 `、` で小休止を指定できます。
+入力テキストはひらがな・カタカナ・ローマ字（Romaji）を受け付けます。`'` でアクセント核、`/` で句境界、読点 `、` で小休止を指定できます。
 
 人間向けの物理背景・コード対応表・参考文献は [README4HUMAN.md](./README4HUMAN.md) にまとめています。
 
