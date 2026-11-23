@@ -395,8 +395,7 @@ const playerHtml = `<!DOCTYPE html>
       <button class="preset-btn" type="button" data-preset="genki">genki</button>
     </div>
     <div class="tools-right">
-      <button id="seedBtn" class="mini-btn" type="button" title="乱数シード切替">seed 2024</button>
-      <button id="wavBtn" class="mini-btn" type="button" title="24kHz WAVを保存">↓ WAV</button>
+      <button id="seedBtn" class="mini-btn" type="button" title="乱数シード切替">🎲 seed 2024</button>
     </div>
   </div>
 
@@ -437,7 +436,6 @@ const elTractHud = document.getElementById("tractHud");
 const elWaveHud = document.getElementById("waveHud");
 const elSynthStat = document.getElementById("synthStat");
 const elSeed = document.getElementById("seedBtn");
-const elWav = document.getElementById("wavBtn");
 const slHz = document.getElementById("slHz");
 const slSmile = document.getElementById("slSmile");
 const slRate = document.getElementById("slRate");
@@ -815,21 +813,20 @@ for (const sl of [slHz, slSmile, slRate]) {
 
 elSeed.addEventListener("click", () => {
   curSeed = curSeed >= 2039 ? 2024 : curSeed + 1;
-  elSeed.textContent = "seed " + curSeed;
+  elSeed.textContent = "🎲 seed " + curSeed;
   startPlay();
 });
 
-elWav.addEventListener("click", () => {
+// Expose synthesized WAV to the outer share page (index.html) outside X's sandboxed iframe
+window.addEventListener("message", (ev) => {
+  if (!ev.data || ev.data.type !== "tokiko:getWav" || !ev.source) return;
   const data = synthesizeIfNeeded();
-  const blob = new Blob([data.res.wav], { type: "audio/wav" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "tokiko_" + curPreset + "_" + curSeed + ".wav";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const targetOrigin = (ev.origin && ev.origin !== "null") ? ev.origin : "*";
+  ev.source.postMessage({
+    type: "tokiko:wav",
+    wav: data.res.wav,
+    filename: "tokiko_" + curPreset + "_" + curSeed + ".wav",
+  }, targetOrigin);
 });
 
 window.addEventListener("resize", () => drawScope(-1));
@@ -969,11 +966,12 @@ const shareHtml = `<!DOCTYPE html>
 <body>
 <main class="wrap">
   <div class="frame-shell">
-    <iframe src="./player.html?v=${VERSION}" title="tokiko / KUDA ${VERSION} 正方形ライブプレイヤー"
-      sandbox="allow-popups allow-same-origin allow-scripts allow-presentation allow-downloads"></iframe>
+    <iframe id="playerFrame" src="./player.html?v=${VERSION}" title="tokiko / KUDA ${VERSION} 正方形ライブプレイヤー"
+      sandbox="allow-popups allow-same-origin allow-scripts allow-presentation"></iframe>
   </div>
 
   <div class="actions">
+    <button id="wavOutBtn" class="btn" type="button">↓ WAV保存</button>
     <button id="copyUrlBtn" class="btn primary" type="button">X投稿用URLをコピー</button>
     <a class="btn" href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub (${ENGINE_KB}KB 純JS) ↗</a>
   </div>
@@ -987,6 +985,31 @@ const shareHtml = `<!DOCTYPE html>
   </section>
 </main>
 <script>
+const playerFrame = document.getElementById("playerFrame");
+const wavOutBtn = document.getElementById("wavOutBtn");
+
+window.addEventListener("message", function (ev) {
+  if (!ev.data || ev.data.type !== "tokiko:wav" || !ev.data.wav) return;
+  if (playerFrame && ev.source !== playerFrame.contentWindow) return;
+  const blob = new Blob([ev.data.wav], { type: "audio/wav" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = ev.data.filename || "tokiko.wav";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  wavOutBtn.textContent = "✓ WAV保存しました";
+  setTimeout(() => { wavOutBtn.textContent = "↓ WAV保存"; }, 1800);
+});
+
+wavOutBtn.addEventListener("click", function () {
+  if (playerFrame && playerFrame.contentWindow) {
+    playerFrame.contentWindow.postMessage({ type: "tokiko:getWav" }, "*");
+  }
+});
+
 document.getElementById("copyUrlBtn").addEventListener("click", function () {
   const url = "${PAGES_BASE}/";
   const btn = this;

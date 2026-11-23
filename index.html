@@ -119,11 +119,12 @@
 <body>
 <main class="wrap">
   <div class="frame-shell">
-    <iframe src="./player.html?v=v0.1" title="tokiko / KUDA v0.1 正方形ライブプレイヤー"
-      sandbox="allow-popups allow-same-origin allow-scripts allow-presentation allow-downloads"></iframe>
+    <iframe id="playerFrame" src="./player.html?v=v0.1" title="tokiko / KUDA v0.1 正方形ライブプレイヤー"
+      sandbox="allow-popups allow-same-origin allow-scripts allow-presentation"></iframe>
   </div>
 
   <div class="actions">
+    <button id="wavOutBtn" class="btn" type="button">↓ WAV保存</button>
     <button id="copyUrlBtn" class="btn primary" type="button">X投稿用URLをコピー</button>
     <a class="btn" href="https://github.com/poidowl/tokiko" target="_blank" rel="noopener noreferrer">GitHub (62KB 純JS) ↗</a>
   </div>
@@ -137,6 +138,31 @@
   </section>
 </main>
 <script>
+const playerFrame = document.getElementById("playerFrame");
+const wavOutBtn = document.getElementById("wavOutBtn");
+
+window.addEventListener("message", function (ev) {
+  if (!ev.data || ev.data.type !== "tokiko:wav" || !ev.data.wav) return;
+  if (playerFrame && ev.source !== playerFrame.contentWindow) return;
+  const blob = new Blob([ev.data.wav], { type: "audio/wav" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = ev.data.filename || "tokiko.wav";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  wavOutBtn.textContent = "✓ WAV保存しました";
+  setTimeout(() => { wavOutBtn.textContent = "↓ WAV保存"; }, 1800);
+});
+
+wavOutBtn.addEventListener("click", function () {
+  if (playerFrame && playerFrame.contentWindow) {
+    playerFrame.contentWindow.postMessage({ type: "tokiko:getWav" }, "*");
+  }
+});
+
 document.getElementById("copyUrlBtn").addEventListener("click", function () {
   const url = "https://poidowl.github.io/tokiko/";
   const btn = this;
