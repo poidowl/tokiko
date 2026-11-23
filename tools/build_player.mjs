@@ -9,9 +9,9 @@ const ROOT = path.resolve(HERE, "..");
 const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const VERSION = "v0.1.3-nama";
-const PLAYER_REV = "v0.1.3-nama";
-const VERSION_NOTE = "生身物理(nama)全部入れ：肺活量＋読点吸気音＆F0連動＋早口舌慣性＋低音声道長ストレッチ＋音域声帯レジスター";
+const VERSION = "v0.1.4-kawaii";
+const PLAYER_REV = "v0.1.4-kawaii";
+const VERSION_NOTE = "かわいさ全盛り(kawaii)：後部声門間隙×スナップ閉鎖＋記号演技(！〜…っ)＋ささやき＋高音「ツ/ジ」調音修正";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
@@ -276,8 +276,8 @@ const playerHtml = `<!DOCTYPE html>
     color: var(--muted);
     border: none;
     border-radius: 4px;
-    padding: 4px 9px;
-    font-size: 11px;
+    padding: 4px 7px;
+    font-size: 10.5px;
     font-weight: 700;
     font-family: inherit;
     cursor: pointer;
@@ -418,6 +418,7 @@ const playerHtml = `<!DOCTYPE html>
       <button class="preset-btn active" type="button" data-preset="kawaii">kawaii</button>
       <button class="preset-btn" type="button" data-preset="amae">amae</button>
       <button class="preset-btn" type="button" data-preset="genki">genki</button>
+      <button class="preset-btn" type="button" data-preset="sasayaki">sasayaki</button>
     </div>
     <div class="tools-right">
       <button id="namaBtn" class="mini-btn" type="button" title="生身物理(肺活量・吸気音・舌慣性・声道長・レジスター)切替">生 nama ON</button>
@@ -427,8 +428,8 @@ const playerHtml = `<!DOCTYPE html>
 
   <div class="knobs">
     <label class="knob">
-      <div class="knob-head"><span>高さ</span><strong id="hzVal">296Hz</strong></div>
-      <input id="slHz" type="range" min="140" max="440" step="2" value="296">
+      <div class="knob-head"><span>高さ</span><strong id="hzVal">302Hz</strong></div>
+      <input id="slHz" type="range" min="140" max="440" step="2" value="302">
     </label>
     <label class="knob">
       <div class="knob-head"><span>息もれ</span><strong id="breathVal">30%</strong></div>
@@ -473,7 +474,7 @@ const rateVal = document.getElementById("rateVal");
 const sampleBtns = Array.from(document.querySelectorAll(".sample-btn"));
 const presetBtns = Array.from(document.querySelectorAll(".preset-btn"));
 
-const BREATH_PRESET_PCT = { kawaii: 30, amae: 42, genki: 26 };
+const BREATH_PRESET_PCT = { kawaii: 30, amae: 42, genki: 26, sasayaki: 78 };
 
 let curPreset = "kawaii";
 let curSeed = 2024;
@@ -511,21 +512,21 @@ function getBreathOpts(pct) {
   if (t <= 0.30) {
     const u = t / 0.30;
     return {
-      rd_base: 0.80 + (1.40 - 0.80) * u,
-      rd_tail: 1.25 + (2.14 - 1.25) * u,
-      asp:     0.005 + (0.044 - 0.005) * u,
-      aspMid:  0.020 + (0.178 - 0.020) * u,
-      bernS:   4.60 + (3.58 - 4.60) * u,
+      rd_base: 0.80 + (1.42 - 0.80) * u,
+      rd_tail: 1.25 + (2.28 - 1.25) * u,
+      asp:     0.005 + (0.049 - 0.005) * u,
+      aspMid:  0.020 + (0.200 - 0.020) * u,
+      bernS:   4.60 + (4.10 - 4.60) * u,
     };
   }
   const u = (t - 0.30) / 0.70;
   const curve = 0.4 * u + 0.6 * u * u;
   return {
-    rd_base: 1.40 + (2.90 - 1.40) * u,
-    rd_tail: 2.14 + (3.60 - 2.14) * u,
-    asp:     0.044 + (0.280 - 0.044) * curve,
-    aspMid:  0.178 + (1.050 - 0.178) * curve,
-    bernS:   3.58 + (2.00 - 3.58) * u,
+    rd_base: 1.42 + (2.90 - 1.42) * u,
+    rd_tail: 2.28 + (3.60 - 2.28) * u,
+    asp:     0.049 + (0.280 - 0.049) * curve,
+    aspMid:  0.200 + (1.050 - 0.200) * curve,
+    bernS:   4.10 + (2.00 - 4.10) * u,
   };
 }
 
