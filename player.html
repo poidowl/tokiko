@@ -409,7 +409,7 @@
       <div><span class="ver-badge">v0.1.3-turbo</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
       <span id="synthStat">待機中 · 24kHz</span>
     </div>
-    <div class="ver-note" title="4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）">変更: 4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）</div>
+    <div class="ver-note" title="4分岐物理そのまま高速化（Node 24・tools/bench_turbo.mjs 計測 / Bark-LSD ≤ 0.025 dB・O(1)側枝リング・声門LUT・モノモーフィック分離）">変更: 4分岐物理そのまま高速化（Node 24・tools/bench_turbo.mjs 計測 / Bark-LSD ≤ 0.025 dB・O(1)側枝リング・声門LUT・モノモーフィック分離）</div>
   </footer>
 </div>
 
@@ -1606,17 +1606,18 @@ function runKudaWaveguide(sc, rawOut, seed, asp, aspMid, bernS) {
     if (sharp) kSharp[t] = 1;
   }
   const LUT_N = 1024;
+  const useCloseLut = Number.isFinite(bernS) && bernS >= 0.5 && bernS <= 32.0;
   const lutOpen = new Float64Array(LUT_N + 2);
-  const lutClose = new Float64Array(LUT_N + 2);
+  const lutClose = useCloseLut ? new Float64Array(LUT_N + 2) : null;
   const lutChink = new Float64Array(LUT_N + 2);
   for (let q = 0; q <= LUT_N; q++) {
     const x = q / LUT_N;
     lutOpen[q] = 0.5 * (1.0 - Math.cos(Math.PI * x));
-    lutClose[q] = 1.0 - Math.pow(x, bernS);
+    if (useCloseLut) lutClose[q] = 1.0 - Math.pow(x, bernS);
     lutChink[q] = Math.sin(Math.PI * x);
   }
   lutOpen[LUT_N + 1] = lutOpen[LUT_N];
-  lutClose[LUT_N + 1] = lutClose[LUT_N];
+  if (useCloseLut) lutClose[LUT_N + 1] = lutClose[LUT_N];
   lutChink[LUT_N + 1] = lutChink[LUT_N];
   const k = new Float64Array(M - 1);
   const dk = new Float64Array(M - 1);
@@ -1768,10 +1769,13 @@ function runKudaWaveguide(sc, rawOut, seed, asp, aspMid, bernS) {
           const p = ph * invTp;
           const idx = p | 0;
           bern = lutOpen[idx] + (lutOpen[idx + 1] - lutOpen[idx]) * (p - idx);
-        } else {
+        } else if (useCloseLut) {
           const p = (ph - tp) * invTeTp;
           const idx = p | 0;
           bern = lutClose[idx] + (lutClose[idx + 1] - lutClose[idx]) * (p - idx);
+        } else {
+          const u = (ph - tp) / Math.max(1e-6, te - tp);
+          bern = 1.0 - Math.pow(u, bernS);
         }
         const pc = ph * invTe;
         const idxC = pc | 0;

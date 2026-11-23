@@ -11,7 +11,7 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3-turbo";
 const PLAYER_REV = "v0.1.3-turbo";
-const VERSION_NOTE = "4分岐物理そのまま 4.3〜6.5倍高速化（平均49x RT・O(1)側枝リング・声門LUT・モノモーフィック分離・Bark-LSD 0.02dB）";
+const VERSION_NOTE = "4分岐物理そのまま高速化（Node 24・tools/bench_turbo.mjs 計測 / Bark-LSD ≤ 0.025 dB・O(1)側枝リング・声門LUT・モノモーフィック分離）";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 

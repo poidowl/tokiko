@@ -1272,18 +1272,20 @@ function runKudaWaveguide(sc, rawOut, seed, asp, aspMid, bernS) {
   }
 
   // 1024-pt glottal waveform LUTs with linear interpolation (<1e-6 error, zero cos/sin/pow at 88.2kHz)
+  // Guard closing-curve LUT to finite bernS in [0.5, 32]; out-of-range values fall back to exact Math.pow (avoids 0**bernS = Infinity when bernS <= 0)
   const LUT_N = 1024;
+  const useCloseLut = Number.isFinite(bernS) && bernS >= 0.5 && bernS <= 32.0;
   const lutOpen = new Float64Array(LUT_N + 2);
-  const lutClose = new Float64Array(LUT_N + 2);
+  const lutClose = useCloseLut ? new Float64Array(LUT_N + 2) : null;
   const lutChink = new Float64Array(LUT_N + 2);
   for (let q = 0; q <= LUT_N; q++) {
     const x = q / LUT_N;
     lutOpen[q] = 0.5 * (1.0 - Math.cos(Math.PI * x));
-    lutClose[q] = 1.0 - Math.pow(x, bernS);
+    if (useCloseLut) lutClose[q] = 1.0 - Math.pow(x, bernS);
     lutChink[q] = Math.sin(Math.PI * x);
   }
   lutOpen[LUT_N + 1] = lutOpen[LUT_N];
-  lutClose[LUT_N + 1] = lutClose[LUT_N];
+  if (useCloseLut) lutClose[LUT_N + 1] = lutClose[LUT_N];
   lutChink[LUT_N + 1] = lutChink[LUT_N];
 
   const k = new Float64Array(M - 1);
@@ -1453,10 +1455,13 @@ function runKudaWaveguide(sc, rawOut, seed, asp, aspMid, bernS) {
           const p = ph * invTp;
           const idx = p | 0;
           bern = lutOpen[idx] + (lutOpen[idx + 1] - lutOpen[idx]) * (p - idx);
-        } else {
+        } else if (useCloseLut) {
           const p = (ph - tp) * invTeTp;
           const idx = p | 0;
           bern = lutClose[idx] + (lutClose[idx + 1] - lutClose[idx]) * (p - idx);
+        } else {
+          const u = (ph - tp) / Math.max(1e-6, te - tp);
+          bern = 1.0 - Math.pow(u, bernS);
         }
         const pc = ph * invTe;
         const idxC = pc | 0;
