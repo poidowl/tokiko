@@ -1224,10 +1224,10 @@ export function synthKuda(text, opts = {}) {
   const N = Math.max(1, Math.trunc(n * fpz * SR));
   const rng = makeRng(seed);
 
-  const R = new Float64Array(M), L = new Float64Array(M);
-  const Rn = new Float64Array(M), Ln = new Float64Array(M);
-  const nR = new Float64Array(MN), nL = new Float64Array(MN);
-  const nRn = new Float64Array(MN), nLn = new Float64Array(MN);
+  let R = new Float64Array(M), L = new Float64Array(M);
+  let Rn = new Float64Array(M), Ln = new Float64Array(M);
+  let nR = new Float64Array(MN), nL = new Float64Array(MN);
+  let nRn = new Float64Array(MN), nLn = new Float64Array(MN);
   const sR = new Float64Array(MS), sL = new Float64Array(MS);
   const pR = new Float64Array(MP), pL = new Float64Array(MP);
 
@@ -1388,46 +1388,61 @@ export function synthKuda(text, opts = {}) {
       const turbDipole = (fJ > 4) ? (sibDip + brdDip) : 0.0;
       const fwdFrac = (sibAlvF + sibPalF) > 0.15 ? 0.95 : 0.72;
 
-      for (let j = 0; j < M - 1; j++) {
-        const wL = j <= 3 ? epiLoss : (j >= 10 && j <= 24 ? cheekLoss : wallLoss);
-        if (j === PIR_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
-          const pa = R[j], pb = L[j + 1], pc = pL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * wallLoss;
-          Rn[j + 1] = (PJ - pb) * wallLoss;
-          const pIn = (PJ - pc) * 0.95;
-          for (let q = MP - 1; q > 0; q--) pR[q] = pR[q - 1] * 0.95;
-          pR[0] = pIn;
-          for (let q = 0; q < MP - 1; q++) pL[q] = pL[q + 1] * 0.95;
-          pL[MP - 1] = pR[MP - 1] * 0.85;
-        } else if (j === VEL_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = Math.max(0.0, velA);
-          const pa = R[j], pb = L[j + 1], pc = nL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          nRn[0] = velGate * (PJ - pc) * nasalLoss;
-        } else if (j === SIN_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = acSinus;
-          const pa = R[j], pb = L[j + 1], pc = sL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          const sIn = (PJ - pc) * 0.992;
-          for (let q = MS - 1; q > 0; q--) sR[q] = sR[q - 1] * 0.992;
-          sR[0] = sIn;
-          for (let q = 0; q < MS - 1; q++) sL[q] = sL[q + 1] * 0.992;
-          sL[MS - 1] = sR[MS - 1] * 0.90;
-        } else {
-          const wS = k[j] * (R[j] - L[j + 1]);
-          Rn[j + 1] = (R[j] + wS) * wL;
-          Ln[j] = (L[j + 1] + wS) * wL;
-        }
-        if (j === fJ && turbDipole !== 0.0) {
-          Rn[j + 1] += fwdFrac * turbDipole;
-          Ln[j] -= (1.0 - fwdFrac) * turbDipole;
-        }
+      for (let j = 0; j < PIR_J; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * epiLoss;
+        Ln[j] = (L[j + 1] + wS) * epiLoss;
+      }
+      {
+        const j = PIR_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
+        const pa = R[j], pb = L[j + 1], pc = pL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * wallLoss;
+        Rn[j + 1] = (PJ - pb) * wallLoss;
+        const pIn = (PJ - pc) * 0.95;
+        for (let q = MP - 1; q > 0; q--) pR[q] = pR[q - 1] * 0.95;
+        pR[0] = pIn;
+        for (let q = 0; q < MP - 1; q++) pL[q] = pL[q + 1] * 0.95;
+        pL[MP - 1] = pR[MP - 1] * 0.85;
+      }
+      for (let j = PIR_J + 1; j < VEL_J; j++) {
+        const wL = j < 10 ? wallLoss : cheekLoss;
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wL;
+        Ln[j] = (L[j + 1] + wS) * wL;
+      }
+      {
+        const j = VEL_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = Math.max(0.0, velA);
+        const pa = R[j], pb = L[j + 1], pc = nL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * cheekLoss;
+        Rn[j + 1] = (PJ - pb) * cheekLoss;
+        nRn[0] = velGate * (PJ - pc) * nasalLoss;
+      }
+      {
+        const j = SIN_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = acSinus;
+        const pa = R[j], pb = L[j + 1], pc = sL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * cheekLoss;
+        Rn[j + 1] = (PJ - pb) * cheekLoss;
+        const sIn = (PJ - pc) * 0.992;
+        for (let q = MS - 1; q > 0; q--) sR[q] = sR[q - 1] * 0.992;
+        sR[0] = sIn;
+        for (let q = 0; q < MS - 1; q++) sL[q] = sL[q + 1] * 0.992;
+        sL[MS - 1] = sR[MS - 1] * 0.90;
+      }
+      for (let j = SIN_J + 1; j < M - 1; j++) {
+        const wL = j <= 24 ? cheekLoss : wallLoss;
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wL;
+        Ln[j] = (L[j + 1] + wS) * wL;
+      }
+      if (fJ >= 0 && fJ < M - 1 && turbDipole !== 0.0) {
+        Rn[fJ + 1] += fwdFrac * turbDipole;
+        Ln[fJ] -= (1.0 - fwdFrac) * turbDipole;
       }
 
       for (let q = 0; q < MN - 1; q++) {
@@ -1452,8 +1467,8 @@ export function synthKuda(text, opts = {}) {
       wallLp2 = 0.020 * wallLp1 + 0.980 * wallLp2;
       const pWall = stopW * vo * wallLp2 * 0.048;
 
-      for (let j = 0; j < M; j++) { R[j] = Rn[j]; L[j] = Ln[j]; }
-      for (let q = 0; q < MN; q++) { nR[q] = nRn[q]; nL[q] = nLn[q]; }
+      const r0 = R, l0 = L; R = Rn; Rn = r0; L = Ln; Ln = l0;
+      const r1 = nR, l1 = nL; nR = nRn; nRn = r1; nL = nLn; nLn = l1;
 
       const pTot = pRadLip + pRadNos + pWall;
       viscLp1 = 0.50 * pTot + 0.50 * viscLp1;
