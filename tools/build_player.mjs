@@ -10,7 +10,7 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3";
-const PLAYER_REV = "v0.1.3-ui2";
+const PLAYER_REV = "v0.1.3-toy1";
 const VERSION_NOTE = "20段の位相分散で声がなめらかに ＋ 約1.25倍速 ＋ CLIの不明オプションはエラーに・--seed追加";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
@@ -45,18 +45,18 @@ const playerHtml = `<!DOCTYPE html>
 <title>tokiko / KUDA ${VERSION} — 仮想発声器官 プレイヤー</title>
 <style>
   :root {
-    --bg: #0c0f12;
-    --surface: #141920;
-    --raised: #1b222c;
-    --border: #252e3a;
-    --border-hi: #344152;
-    --text: #f2ede4;
-    --muted: #8f9ba8;
-    --dim: #657180;
-    --accent: #e85d3f;
-    --accent-hi: #f27256;
-    --brass: #d99b38;
-    --teal: #2ca58d;
+    --bg: #ffdf92;
+    --surface: #fff6db;
+    --raised: #ffd178;
+    --border: #997f75;
+    --border-hi: #453449;
+    --text: #30263c;
+    --muted: #574958;
+    --dim: #655664;
+    --accent: #ff897d;
+    --accent-hi: #ffa598;
+    --brass: #79413e;
+    --teal: #116e65;
     --teal-dim: rgba(44, 165, 141, 0.16);
     --brass-dim: rgba(217, 155, 56, 0.16);
   }
@@ -379,12 +379,38 @@ const playerHtml = `<!DOCTYPE html>
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .card { background: linear-gradient(155deg,#ffe9a8,#ffd27e); }
+  .brand { align-items: center; }
+  .brand h1 { font: 900 23px/1 system-ui,sans-serif; letter-spacing: -.075em; }
+  .face { position: relative; width: 28px; height: 24px; flex: none; border: 2px solid #40344a; border-radius: 8px; background: #8ddbc7; transform: rotate(-7deg); }
+  .face::before { content: ""; position: absolute; top: 5px; left: 5px; width: 3px; height: 4px; border-radius: 2px; background: #40344a; box-shadow: 10px 0 #40344a; }
+  .face::after { content: ""; position: absolute; left: 8px; bottom: 4px; width: 8px; height: 4px; border-radius: 0 0 6px 6px; background: #40344a; }
+  .card:has(.play-btn.playing) .face::after { height: 8px; border-radius: 50%; animation: chatter .24s ease-in-out infinite alternate; transform-origin: bottom; }
+  @keyframes chatter { to { transform: scaleY(.45); } }
+  .play-btn, .sample-btn { border: 1.5px solid #453449; box-shadow: 0 2px #453449; }
+  .play-btn, .play-btn.playing { color: #30263c; }
+  .play-btn.playing { background: #89dbc6; }
+  .sample-btn.active { background: #ffd079; border-color: #453449; }
+  .scope-box { border: 3px solid #453449; border-radius: 15px; box-shadow: 0 2px #8b6c64; }
+  .scope-hud { color: #e2d6ea; }
+  .presets { border-radius: 9px; background: #fff8e4; }
+  .preset-btn.active { color: #30263c; box-shadow: inset 0 0 0 1px #453449; }
+  [data-preset="kawaii"].active { background: #ffa9bf; }
+  [data-preset="amae"].active { background: #cab6f5; }
+  [data-preset="genki"].active { background: #8addbd; }
+  .knobs { border-radius: 12px; }
+  :focus-visible { outline: 3px solid #614898; outline-offset: 1px; }
+  @media (max-width: 380px) { .brand .tag { display:none; } }
+  @media (max-height: 390px) { body { overflow-y:auto; } .card { min-height:390px; } }
+  @media (prefers-reduced-motion: reduce) { .autoplay-pill, .card:has(.play-btn.playing) .face::after { animation:none; } }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="topbar">
     <div class="brand">
+      <span class="face" aria-hidden="true"></span>
       <h1>tokiko</h1>
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
@@ -676,11 +702,11 @@ function drawScope(progress) {
   const ctx = elScope.getContext("2d");
   ctx.save();
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = "#080b0e";
+  ctx.fillStyle = "#272235";
   ctx.fillRect(0, 0, w, h);
 
   const splitX = Math.round(w * 0.52);
-  ctx.strokeStyle = "#1d2530";
+  ctx.strokeStyle = "#443b54";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(splitX + 0.5, 8);
@@ -756,7 +782,7 @@ function drawScope(progress) {
   ctx.closePath();
   ctx.fillStyle = "rgba(217, 155, 56, " + (0.14 + 0.16 * vo).toFixed(3) + ")";
   ctx.fill();
-  ctx.strokeStyle = vo > 0.25 ? "#d99b38" : "#8f9ba8";
+  ctx.strokeStyle = vo > 0.25 ? "#ffd278" : "#8f9ba8";
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
@@ -778,7 +804,7 @@ function drawScope(progress) {
   }
 
   // Tract labels
-  ctx.fillStyle = "#657180";
+  ctx.fillStyle = "#c0afc9";
   ctx.font = "9.5px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.fillText("声門", tx0, h - 6);
   ctx.fillText("鼻腔", tx1 - 24, nasalY - 9);
@@ -790,14 +816,14 @@ function drawScope(progress) {
   // --- RIGHT TOP: Waveform + Playhead ---
   const rx0 = splitX + 10, rw = Math.max(24, w - rx0 - 10);
   const wy0 = 22, wh = Math.round((h - 32) * 0.46), wcy = wy0 + wh * 0.5;
-  ctx.strokeStyle = "#18202a";
+  ctx.strokeStyle = "#443b54";
   ctx.beginPath();
   ctx.moveTo(rx0, wcy);
   ctx.lineTo(rx0 + rw, wcy);
   ctx.stroke();
 
   const step = Math.max(1, Math.floor(trimmed.length / rw));
-  ctx.strokeStyle = "#2ca58d";
+  ctx.strokeStyle = "#79e2c6";
   ctx.lineWidth = 1.05;
   ctx.beginPath();
   for (let c = 0; c < rw; c++) {
@@ -815,7 +841,7 @@ function drawScope(progress) {
 
   if (progress >= 0) {
     const px = rx0 + progress * rw;
-    ctx.strokeStyle = "#e85d3f";
+    ctx.strokeStyle = "#ff99ad";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(px, wy0);
@@ -848,7 +874,7 @@ function drawScope(progress) {
     ctx.moveTo(rx0, sy1 - 2);
     ctx.lineTo(rx0 + rw, sy1 - 2);
   }
-  ctx.strokeStyle = hasLive ? "#d99b38" : "#2b3644";
+  ctx.strokeStyle = hasLive ? "#ffd278" : "#2b3644";
   ctx.lineWidth = 1.25;
   ctx.stroke();
   if (hasLive) {
@@ -859,7 +885,7 @@ function drawScope(progress) {
     ctx.fill();
   }
 
-  ctx.fillStyle = "#657180";
+  ctx.fillStyle = "#c0afc9";
   ctx.font = "9.5px ui-monospace, SFMono-Regular, Menlo, monospace";
   for (const [hzT, lbl] of [[1000, "1k"], [3000, "3k"], [5500, "5.5k"]]) {
     const lx = rx0 + (hzT / 6000) * rw;
@@ -1113,6 +1139,14 @@ const shareHtml = `<!DOCTYPE html>
     .wrap { max-width: 900px; display: grid; grid-template-columns: 480px 1fr; align-items: start; gap: 28px; margin-top: 5vh; }
     .details { padding-top: 8px; }
   }
+
+  :root { --bg:#fbf3de; --surface:#fffcf0; --text:#382e40; --muted:#655665; --dim:#665766; --border:#b4a09b; --brass:#854237; --teal:#14685e; }
+  body { background: radial-gradient(#d8cbb6 1px,transparent 1px) 0 0 / 16px 16px, var(--bg); }
+  .frame-shell { border: 2px solid #443547; border-radius: 20px; box-shadow: 0 5px #443547; }
+  .details { background: var(--surface); padding:18px; border:1px solid var(--border); border-radius:16px; }
+  .details h1 { letter-spacing:-.07em; } .details small { letter-spacing:0; }
+  .btn.primary { color:#34283a; background:#ff9988; border-color:#443547; box-shadow:0 2px #443547; }
+  .btn.primary:hover { color:#34283a; }
 </style>
 </head>
 <body>
