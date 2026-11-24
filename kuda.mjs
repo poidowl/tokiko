@@ -1470,17 +1470,24 @@ export function synthKuda(text, opts = {}) {
     dcX = rawOut[i]; dcY = y; rawOut[i] = y;
   }
 
-  for (const [apBase, apMod, fMod, ph0] of [[0.46, 0.25, 5.1, 0.3], [-0.40, 0.22, 7.3, 1.8], [0.28, 0.18, 9.7, 3.1]]) {
-    let ax1 = 0.0, ay1 = 0.0;
+  // 20-stage static 2nd-order allpass phase dispersion (3D vocal-tract/head diffraction; 0.00 dB magnitude change, clears F65 phase graininess)
+  for (let s = 0; s < 20; s++) {
+    const fc = 650.0 * Math.pow(5800.0 / 650.0, s / 19.0);
+    const Q = 1.5 + 0.6 * (((s * 7) % 5) / 4.0);
+    const w0 = 2.0 * Math.PI * fc / SR;
+    const alpha = Math.sin(w0) / (2.0 * Q);
+    const cosW = Math.cos(w0);
+    const a0 = 1.0 + alpha;
+    const b0 = (1.0 - alpha) / a0, b1 = (-2.0 * cosW) / a0, b2 = (1.0 + alpha) / a0;
+    const a1 = (-2.0 * cosW) / a0, a2 = (1.0 - alpha) / a0;
+    let x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
     for (let i = 0; i < N; i++) {
-      const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
-      const sec = i / SR;
-      const ap = Math.max(-0.78, Math.min(0.78, apBase + 0.08 * Math.tanh((A_tr[fIdx][24] - 2.4) * 0.5) + apMod * Math.sin(2 * Math.PI * fMod * sec + ph0)));
-      const xi = rawOut[i], yi = ap * xi + ax1 - ap * ay1;
-      ax1 = xi; ay1 = yi; rawOut[i] = yi;
+      const xi = rawOut[i];
+      const yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = xi; y2 = y1; y1 = yi;
+      rawOut[i] = yi;
     }
   }
-
   {
     const win = Math.trunc(0.065 * SR);
     const rmsArr = new Float64Array(N);
