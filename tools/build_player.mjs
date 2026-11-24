@@ -10,7 +10,7 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3";
-const PLAYER_REV = "v0.1.3-bubble1";
+const PLAYER_REV = "v0.1.3-host1";
 const VERSION_NOTE = "20段の位相分散で声がなめらかに ＋ 約1.25倍速 ＋ CLIの不明オプションはエラーに・--seed追加";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
@@ -404,6 +404,9 @@ const playerHtml = `<!DOCTYPE html>
   @media (max-width: 380px) { .brand .tag { display:none; } }
   @media (max-height: 390px) { body { overflow-y:auto; } .card { min-height:390px; } }
   @media (prefers-reduced-motion: reduce) { .autoplay-pill, .card:has(.play-btn.playing) .face::after { animation:none; } }
+  .host-row { display:flex; align-items:center; gap:7px; flex:none; color:var(--text); font-size:11px; }
+  .host-row button { flex:none; }
+  .host-row button[aria-pressed="true"] { background:#cab6f5; color:#30263c; }
   .input-row { align-items:center; gap:9px; }
   .input-row .play-btn { align-self:stretch; }
   .bubble { position:relative; flex:1; min-width:0; border:2px solid #453449; border-radius:12px; background:#fff9e8; }
@@ -482,6 +485,10 @@ const playerHtml = `<!DOCTYPE html>
     </label>
   </div>
 
+  <div class="host-row">
+    <button id="hostToggle" class="mini-btn" type="button" aria-pressed="true" aria-label="司会の声">司会 ON</button>
+    <span id="hostLine" role="status">ようこそ。声ができるまでの時間を実況するで！</span>
+  </div>
   <footer class="ver-foot">
     <div class="ver-top">
       <div><span class="ver-badge">${VERSION}</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
@@ -647,7 +654,60 @@ function showAutoPrompt() {
   if (elAutoPill) elAutoPill.hidden = false;
 }
 
+// The host has its own source so it can be silenced independently of the demo.
+const hostToggle = document.getElementById("hostToggle");
+const hostLine = document.getElementById("hostLine");
+let hostEnabled = true;
+try { hostEnabled = localStorage.getItem("tokiko.host") !== "off"; } catch (_) {}
+let hostSource = null;
+let hostWelcomed = false;
+
+function stopHost() {
+  if (!hostSource) return;
+  hostSource.onended = null;
+  hostSource.stop();
+  hostSource.disconnect();
+  hostSource = null;
+}
+
+function showHostSetting() {
+  hostToggle.setAttribute("aria-pressed", String(hostEnabled));
+  hostToggle.textContent = hostEnabled ? "司会 ON" : "司会 OFF";
+  hostLine.hidden = !hostEnabled;
+}
+showHostSetting();
+hostToggle.addEventListener("click", () => {
+  hostEnabled = !hostEnabled;
+  stopHost();
+  showHostSetting();
+  try { localStorage.setItem("tokiko.host", hostEnabled ? "on" : "off"); } catch (_) {}
+});
+
+function reportTake(data, reused) {
+  if (!hostEnabled) return;
+  const seconds = (data.synthMs / 1000).toFixed(2);
+  const greeting = hostWelcomed ? "" : "ようこそ！ ";
+  hostWelcomed = true;
+  hostLine.textContent = greeting + (reused ? "保存済みの声。生成時は " : "ただいまの合成は ") + seconds + " 秒！";
+  const digits = ["れい","いち","に","さん","よん","ご","ろく","なな","はち","きゅう"];
+  const spoken = Array.from(seconds, ch => ch === "." ? "てん" : digits[Number(ch)]).join("");
+  const words = greeting + (reused ? "つくっておいたこえ。ごうせいは、" : "いまのごうせいは、") + spoken + "びょう！";
+  const voice = synthKuda(words, { preset:"genki", hz:235, srOut:24000, seed:17 });
+  const buffer = audioCtx.createBuffer(1, voice.samples.length, voice.sr);
+  buffer.getChannelData(0).set(voice.samples);
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+  hostSource = source;
+  source.onended = () => {
+    source.disconnect();
+    if (hostSource === source) hostSource = null;
+  };
+  source.start();
+}
+
 function stopPlay() {
+  stopHost();
   autoPlayDone = true;
   hideAutoPrompt();
   if (curSource) {
@@ -663,6 +723,7 @@ function stopPlay() {
 
 function startPlay() {
   stopPlay();
+  const previous = cached;
   const data = synthesizeIfNeeded();
   const ctx = ensureAudio();
   if (!ctx) return;
@@ -695,6 +756,7 @@ function startPlay() {
       elPlay.classList.remove("playing");
       elPlay.textContent = "▶ しゃべる";
       drawScope(-1);
+      reportTake(data, previous === data);
     }
   };
   src.start();
