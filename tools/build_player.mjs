@@ -10,13 +10,15 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3";
-const PLAYER_REV = "v0.1.3";
+const PLAYER_REV = "v0.1.3-ui2";
 const VERSION_NOTE = "20段の位相分散で声がなめらかに ＋ 約1.25倍速 ＋ CLIの不明オプションはエラーに・--seed追加";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
 let rawSrc = fs.readFileSync(path.join(ROOT, "kuda.mjs"), "utf8");
-const ENGINE_KB = Math.round(Buffer.byteLength(rawSrc, "utf8") / 1000);
+const bytes = (text) => Buffer.byteLength(text, "utf8");
+const kb = (text) => (bytes(text) / 1000).toFixed(1) + " kB";
+const exactSize = (text) => bytes(text).toLocaleString("en-US") + " B";
 
 // Strip shebang, Node.js CLI footer (contains top-level await), and ES module `export ` keywords
 let engineSrc = rawSrc
@@ -37,7 +39,7 @@ const playerHtml = `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <link rel="canonical" href="${PAGES_BASE}/">
 <title>tokiko / KUDA ${VERSION} — 仮想発声器官 プレイヤー</title>
@@ -387,7 +389,7 @@ const playerHtml = `<!DOCTYPE html>
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
     <div class="meta-right">
-      <span class="stat-chip">${ENGINE_KB}KB · 0B</span>
+      <span class="stat-chip">ソース ${kb(rawSrc)}</span>
       <a class="gh-link" href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
     </div>
   </div>
@@ -986,9 +988,9 @@ const shareHtml = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="tokiko (KUDA ${VERSION}) — ${ENGINE_KB}KB・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
+<meta name="description" content="tokiko (KUDA ${VERSION}) — ソース ${kb(rawSrc)}・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
 <meta name="twitter:card" content="player">
-<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
+<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — ソース ${kb(rawSrc)}・重み0Bの仮想発声器官（純JS）">
 <meta name="twitter:description" content="録音0Byte・学習モデルなし。4分岐ケリー・ロックバウム声道導波管（口31+鼻23+副鼻腔10+梨状窩3）だけで日本語を喋る純JS仮想発声器官。カード上でそのまま声道を動かして聴けます。">
 <meta name="twitter:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
 <meta name="twitter:player" content="${PAGES_BASE}/player.html?v=${PLAYER_REV}">
@@ -996,7 +998,7 @@ const shareHtml = `<!DOCTYPE html>
 <meta name="twitter:player:height" content="480">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${PAGES_BASE}/">
-<meta property="og:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
+<meta property="og:title" content="tokiko / KUDA ${VERSION} — ソース ${kb(rawSrc)}・重み0Bの仮想発声器官（純JS）">
 <meta property="og:description" content="録音0Byte・学習モデルなし。4分岐声道導波管だけで日本語を喋る純JS仮想発声器官。">
 <meta property="og:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
 <meta property="og:image:width" content="1024">
@@ -1097,6 +1099,20 @@ const shareHtml = `<!DOCTYPE html>
     body { padding: 12px 8px 24px; }
     .frame-shell { aspect-ratio: auto; height: 480px; }
   }
+  .details { min-width: 0; display: grid; gap: 16px; align-content: start; }
+  .details h1 { margin: 0; font-size: 30px; line-height: 1.1; }
+  .details small { color: var(--muted); font-size: 14px; }
+  .sizes { border-block: 1px solid var(--border); padding: 14px 0; }
+  .sizes h2 { font-size: 15px; margin: 0 0 12px; }
+  .sizes dl { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 0; font-size: 13px; }
+  .sizes code, .sizes p { color: var(--muted); font-size: 12px; }
+  .sizes dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .sizes p { margin: 14px 0 0; }
+  .details a { color: var(--text); }
+  @media (min-width: 840px) {
+    .wrap { max-width: 900px; display: grid; grid-template-columns: 480px 1fr; align-items: start; gap: 28px; margin-top: 5vh; }
+    .details { padding-top: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -1107,19 +1123,32 @@ const shareHtml = `<!DOCTYPE html>
       sandbox="allow-popups allow-same-origin allow-scripts allow-presentation"></iframe>
   </div>
 
+  <aside class="details">
+  <h1>tokiko <small>/ KUDA</small></h1>
   <div class="actions">
-    <button id="wavOutBtn" class="btn" type="button">↓ WAV保存</button>
-    <button id="copyUrlBtn" class="btn primary" type="button">X投稿用URLをコピー</button>
-    <a class="btn" href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub (${ENGINE_KB}KB 純JS) ↗</a>
+    <button id="wavOutBtn" class="btn primary" type="button">↓ WAV保存</button>
+    <button id="copyUrlBtn" class="btn" type="button">URLをコピー</button>
+
   </div>
 
+  <section class="sizes">
+    <h2>コード容量</h2>
+    <dl>
+      <dt>エンジン原本 <code>kuda.mjs</code></dt><dd>${exactSize(rawSrc)}</dd>
+      <dt>埋め込みエンジン</dt><dd>${exactSize(compactEngine)}</dd>
+      <dt>プレイヤー全体 <code>player.html</code></dt><dd>${exactSize(playerHtml)}</dd>
+      <dt>学習済みモデルの重み</dt><dd>0 B</dd>
+    </dl>
+    <p>圧縮前の UTF-8 容量。原本にはコメントと CLI を含みます。プレイヤー全体には埋め込みエンジンと操作画面を含みます。</p>
+  </section>
   <section class="ver-panel" aria-label="バージョン情報">
     <div class="vh">
       <span><strong>${VERSION}</strong> · Virtual Vocal Organ KUDA</span>
-      <span>MIT · 0B Weights</span>
+      <span><a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub ↗</a> · MIT</span>
     </div>
     <div>変更内容: ${VERSION_NOTE}</div>
   </section>
+  </aside>
 </main>
 <script>
 const playerFrame = document.getElementById("playerFrame");
@@ -1153,7 +1182,7 @@ document.getElementById("copyUrlBtn").addEventListener("click", function () {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => {
       btn.textContent = "✓ コピーしました";
-      setTimeout(() => { btn.textContent = "X投稿用URLをコピー"; }, 2000);
+      setTimeout(() => { btn.textContent = "URLをコピー"; }, 2000);
     });
   }
 });
@@ -1165,4 +1194,4 @@ document.getElementById("copyUrlBtn").addEventListener("click", function () {
 fs.writeFileSync(path.join(OUT_DIR, "player.html"), playerHtml, "utf8");
 fs.writeFileSync(path.join(OUT_DIR, "index.html"), shareHtml, "utf8");
 
-console.log(`Built ${VERSION} -> player.html (${Math.round(Buffer.byteLength(playerHtml) / 1024)} KB), index.html (${Math.round(Buffer.byteLength(shareHtml) / 1024)} KB)`);
+console.log(`Built ${VERSION} -> player.html (${kb(playerHtml)}), index.html (${kb(shareHtml)})`);
