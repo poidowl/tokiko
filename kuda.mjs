@@ -24,7 +24,7 @@
  * 動作環境:
  *   Node.js / ブラウザ両対応の完全1ファイル独立 ESM (外部 import ゼロ)。
  *   - ESM: `import { synthKuda } from "./kuda.mjs"; const { wav, samples, sr } = synthKuda("こんにちは");`
- *   - CLI: `node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] -o out.wav "テキスト"`
+ *   - CLI: `node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] [--seed N] -o out.wav "テキスト"`
  */
 export const SR = 44100;
 const FP = 5.0;
@@ -1224,10 +1224,10 @@ export function synthKuda(text, opts = {}) {
   const N = Math.max(1, Math.trunc(n * fpz * SR));
   const rng = makeRng(seed);
 
-  const R = new Float64Array(M), L = new Float64Array(M);
-  const Rn = new Float64Array(M), Ln = new Float64Array(M);
-  const nR = new Float64Array(MN), nL = new Float64Array(MN);
-  const nRn = new Float64Array(MN), nLn = new Float64Array(MN);
+  let R = new Float64Array(M), L = new Float64Array(M);
+  let Rn = new Float64Array(M), Ln = new Float64Array(M);
+  let nR = new Float64Array(MN), nL = new Float64Array(MN);
+  let nRn = new Float64Array(MN), nLn = new Float64Array(MN);
   const sR = new Float64Array(MS), sL = new Float64Array(MS);
   const pR = new Float64Array(MP), pL = new Float64Array(MP);
 
@@ -1388,46 +1388,61 @@ export function synthKuda(text, opts = {}) {
       const turbDipole = (fJ > 4) ? (sibDip + brdDip) : 0.0;
       const fwdFrac = (sibAlvF + sibPalF) > 0.15 ? 0.95 : 0.72;
 
-      for (let j = 0; j < M - 1; j++) {
-        const wL = j <= 3 ? epiLoss : (j >= 10 && j <= 24 ? cheekLoss : wallLoss);
-        if (j === PIR_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
-          const pa = R[j], pb = L[j + 1], pc = pL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * wallLoss;
-          Rn[j + 1] = (PJ - pb) * wallLoss;
-          const pIn = (PJ - pc) * 0.95;
-          for (let q = MP - 1; q > 0; q--) pR[q] = pR[q - 1] * 0.95;
-          pR[0] = pIn;
-          for (let q = 0; q < MP - 1; q++) pL[q] = pL[q + 1] * 0.95;
-          pL[MP - 1] = pR[MP - 1] * 0.85;
-        } else if (j === VEL_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = Math.max(0.0, velA);
-          const pa = R[j], pb = L[j + 1], pc = nL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          nRn[0] = velGate * (PJ - pc) * nasalLoss;
-        } else if (j === SIN_J) {
-          const Aa = A[j], Ab = A[j + 1], Ac = acSinus;
-          const pa = R[j], pb = L[j + 1], pc = sL[0];
-          const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
-          Ln[j] = (PJ - pa) * cheekLoss;
-          Rn[j + 1] = (PJ - pb) * cheekLoss;
-          const sIn = (PJ - pc) * 0.992;
-          for (let q = MS - 1; q > 0; q--) sR[q] = sR[q - 1] * 0.992;
-          sR[0] = sIn;
-          for (let q = 0; q < MS - 1; q++) sL[q] = sL[q + 1] * 0.992;
-          sL[MS - 1] = sR[MS - 1] * 0.90;
-        } else {
-          const wS = k[j] * (R[j] - L[j + 1]);
-          Rn[j + 1] = (R[j] + wS) * wL;
-          Ln[j] = (L[j + 1] + wS) * wL;
-        }
-        if (j === fJ && turbDipole !== 0.0) {
-          Rn[j + 1] += fwdFrac * turbDipole;
-          Ln[j] -= (1.0 - fwdFrac) * turbDipole;
-        }
+      for (let j = 0; j < PIR_J; j++) {
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * epiLoss;
+        Ln[j] = (L[j + 1] + wS) * epiLoss;
+      }
+      {
+        const j = PIR_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = 0.25;
+        const pa = R[j], pb = L[j + 1], pc = pL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * wallLoss;
+        Rn[j + 1] = (PJ - pb) * wallLoss;
+        const pIn = (PJ - pc) * 0.95;
+        for (let q = MP - 1; q > 0; q--) pR[q] = pR[q - 1] * 0.95;
+        pR[0] = pIn;
+        for (let q = 0; q < MP - 1; q++) pL[q] = pL[q + 1] * 0.95;
+        pL[MP - 1] = pR[MP - 1] * 0.85;
+      }
+      for (let j = PIR_J + 1; j < VEL_J; j++) {
+        const wL = j < 10 ? wallLoss : cheekLoss;
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wL;
+        Ln[j] = (L[j + 1] + wS) * wL;
+      }
+      {
+        const j = VEL_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = Math.max(0.0, velA);
+        const pa = R[j], pb = L[j + 1], pc = nL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * cheekLoss;
+        Rn[j + 1] = (PJ - pb) * cheekLoss;
+        nRn[0] = velGate * (PJ - pc) * nasalLoss;
+      }
+      {
+        const j = SIN_J;
+        const Aa = A[j], Ab = A[j + 1], Ac = acSinus;
+        const pa = R[j], pb = L[j + 1], pc = sL[0];
+        const PJ = 2.0 * (Aa * pa + Ab * pb + Ac * pc) / (Aa + Ab + Ac);
+        Ln[j] = (PJ - pa) * cheekLoss;
+        Rn[j + 1] = (PJ - pb) * cheekLoss;
+        const sIn = (PJ - pc) * 0.992;
+        for (let q = MS - 1; q > 0; q--) sR[q] = sR[q - 1] * 0.992;
+        sR[0] = sIn;
+        for (let q = 0; q < MS - 1; q++) sL[q] = sL[q + 1] * 0.992;
+        sL[MS - 1] = sR[MS - 1] * 0.90;
+      }
+      for (let j = SIN_J + 1; j < M - 1; j++) {
+        const wL = j <= 24 ? cheekLoss : wallLoss;
+        const wS = k[j] * (R[j] - L[j + 1]);
+        Rn[j + 1] = (R[j] + wS) * wL;
+        Ln[j] = (L[j + 1] + wS) * wL;
+      }
+      if (fJ >= 0 && fJ < M - 1 && turbDipole !== 0.0) {
+        Rn[fJ + 1] += fwdFrac * turbDipole;
+        Ln[fJ] -= (1.0 - fwdFrac) * turbDipole;
       }
 
       for (let q = 0; q < MN - 1; q++) {
@@ -1452,8 +1467,8 @@ export function synthKuda(text, opts = {}) {
       wallLp2 = 0.020 * wallLp1 + 0.980 * wallLp2;
       const pWall = stopW * vo * wallLp2 * 0.048;
 
-      for (let j = 0; j < M; j++) { R[j] = Rn[j]; L[j] = Ln[j]; }
-      for (let q = 0; q < MN; q++) { nR[q] = nRn[q]; nL[q] = nLn[q]; }
+      const r0 = R, l0 = L; R = Rn; Rn = r0; L = Ln; Ln = l0;
+      const r1 = nR, l1 = nL; nR = nRn; nRn = r1; nL = nLn; nLn = l1;
 
       const pTot = pRadLip + pRadNos + pWall;
       viscLp1 = 0.50 * pTot + 0.50 * viscLp1;
@@ -1470,17 +1485,24 @@ export function synthKuda(text, opts = {}) {
     dcX = rawOut[i]; dcY = y; rawOut[i] = y;
   }
 
-  for (const [apBase, apMod, fMod, ph0] of [[0.46, 0.25, 5.1, 0.3], [-0.40, 0.22, 7.3, 1.8], [0.28, 0.18, 9.7, 3.1]]) {
-    let ax1 = 0.0, ay1 = 0.0;
+  // 20-stage static 2nd-order allpass phase dispersion (3D vocal-tract/head diffraction; 0.00 dB magnitude change, clears F65 phase graininess)
+  for (let s = 0; s < 20; s++) {
+    const fc = 650.0 * Math.pow(5800.0 / 650.0, s / 19.0);
+    const Q = 1.5 + 0.6 * (((s * 7) % 5) / 4.0);
+    const w0 = 2.0 * Math.PI * fc / SR;
+    const alpha = Math.sin(w0) / (2.0 * Q);
+    const cosW = Math.cos(w0);
+    const a0 = 1.0 + alpha;
+    const b0 = (1.0 - alpha) / a0, b1 = (-2.0 * cosW) / a0, b2 = (1.0 + alpha) / a0;
+    const a1 = (-2.0 * cosW) / a0, a2 = (1.0 - alpha) / a0;
+    let x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
     for (let i = 0; i < N; i++) {
-      const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
-      const sec = i / SR;
-      const ap = Math.max(-0.78, Math.min(0.78, apBase + 0.08 * Math.tanh((A_tr[fIdx][24] - 2.4) * 0.5) + apMod * Math.sin(2 * Math.PI * fMod * sec + ph0)));
-      const xi = rawOut[i], yi = ap * xi + ax1 - ap * ay1;
-      ax1 = xi; ay1 = yi; rawOut[i] = yi;
+      const xi = rawOut[i];
+      const yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = xi; y2 = y1; y1 = yi;
+      rawOut[i] = yi;
     }
   }
-
   {
     const win = Math.trunc(0.065 * SR);
     const rmsArr = new Float64Array(N);
@@ -1545,22 +1567,25 @@ if (typeof process !== "undefined" && process.versions?.node && process.argv?.[1
   if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const fs = await import("node:fs");
     const args = process.argv.slice(2);
-    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, textParts = [];
+    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, seed = 2024, textParts = [], optsDone = false;
+    const usage = "使い方: node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] [--seed N] -o out.wav [--] \"テキスト\"";
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
-      if ((a === "-o" || a === "--out") && args[i + 1]) { outPath = args[++i]; }
-      else if (a === "--preset" && args[i + 1]) { preset = args[++i]; }
-      else if (a === "--sr" && args[i + 1]) { srOut = Number(args[++i]) || 24000; }
-      else if (a === "--flat" && args[i + 1]) { flatHz = Number(args[++i]) || null; }
-      else if (a === "-h" || a === "--help") {
-        console.log("使い方: node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] -o out.wav \"テキスト\"");
-        process.exit(0);
-      } else {
-        textParts.push(a);
-      }
+      if (optsDone || !a.startsWith("-") || a === "-") { textParts.push(a); continue; }
+      if (a === "--") { optsDone = true; continue; }
+      if (a === "-h" || a === "--help") { console.log(usage); process.exit(0); }
+      const val = args[i + 1];
+      if (!["-o", "--out", "--preset", "--sr", "--flat", "--seed"].includes(a)) { console.error(`kuda: 未知のオプション ${a}\n${usage}`); process.exit(2); }
+      if (val === undefined) { console.error(`kuda: ${a} に値がありません\n${usage}`); process.exit(2); }
+      i++;
+      if (a === "-o" || a === "--out") outPath = val;
+      else if (a === "--preset") preset = val;
+      else if (a === "--sr") srOut = Number(val) || 24000;
+      else if (a === "--flat") flatHz = Number(val) || null;
+      else if (a === "--seed") seed = Number.isFinite(Number(val)) ? Number(val) : 2024;
     }
     const text = textParts.join(" ") || "わたし、にほんご、ちょっとしゃべれます";
-    const res = synthKuda(text, { preset, srOut, flatHz });
+    const res = synthKuda(text, { preset, srOut, flatHz, seed });
     fs.writeFileSync(outPath, res.wav);
     console.log(`KUDA (${preset}, ${res.sr}Hz): wrote ${outPath} (${res.wav.byteLength} bytes, ${(res.samples.length / res.sr).toFixed(2)}s)`);
   }
