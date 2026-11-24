@@ -352,7 +352,7 @@
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
     <div class="meta-right">
-      <span class="stat-chip">111KB · 0B</span>
+      <span class="stat-chip">114KB · 0B</span>
       <a class="gh-link" href="https://github.com/poidowl/tokiko" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
     </div>
   </div>
@@ -695,7 +695,7 @@ const VEL_J = 14;
 const SIN_J = 15;
 const PIR_J = 4;
 const KUDA_PRESETS = {
-  kawaii:   { hz: 302.0, smile: 0.56, rd_base: 1.45, rd_tail: 2.28, bernS: 4.15, scoop: 1.72, asp: 0.049, aspMid: 0.200, rate: 1.00, tdZeta: 0.68, slLift: 0.115, hopf: 0.55 },
+  kawaii:   { hz: 302.0, smile: 0.56, rd_base: 1.56, rd_tail: 2.32, bernS: 4.15, scoop: 1.72, asp: 0.042, aspMid: 0.170, rate: 1.00, tdZeta: 0.68, slLift: 0.115, hopf: 0.55 },
   amae:     { hz: 290.0, smile: 0.50, rd_base: 1.60, rd_tail: 2.62, bernS: 3.65, scoop: 2.05, asp: 0.068, aspMid: 0.275, rate: 1.09, tdZeta: 1.18, slLift: 0.08, hopf: 0.78 },
   genki:    { hz: 320.0, smile: 0.72, rd_base: 1.36, rd_tail: 2.12, bernS: 4.30, scoop: 1.55, asp: 0.044, aspMid: 0.175, rate: 0.93, tdZeta: 0.80, slLift: 0.13, hopf: 0.35 },
   sasayaki: { hz: 288.0, smile: 0.48, rd_base: 2.35, rd_tail: 3.25, bernS: 2.40, scoop: 1.40, asp: 0.165, aspMid: 0.620, rate: 1.10, tdZeta: 1.25, slLift: 0.06, hopf: 0.90 },
@@ -740,8 +740,8 @@ const HA_LEXICAL_END = new Set(["ハハ", "チチハハ", "コノハ", "ソノ�
 const NO_TO_MO_U_RE = /^(?:ウエ(?![ンイ])|ウチ|ウシロ|ウラ|ウミ|ウタ(?![ンイ])|ウン|ウワサ|ウワギ|ウゴキ|ウサギ|ウナギ)/;
 const NO_ONLY_U_RE = /^(?:ウデ|ウソ|ウマ|ウシ)/;
 const ACCENT_KAWAII = {
-  reg: 335.0, rng: 10.2, jump: 5.2, fall: 5.3, sag: 1.0, lag: 1.0, rlag: 0.5,
-  ds: 1.5, ds_h: 0.35, reset: 0.88, decl: 0.03, fin: 0.06, qrise: 6.2, sm: 30.0,
+  reg: 325.0, rng: 6.8, jump: 3.0, fall: 3.2, sag: 0.65, lag: 1.15, rlag: 0.65,
+  ds: 1.1, ds_h: 0.25, reset: 0.85, decl: 0.06, fin: 0.12, qrise: 5.2, sm: 42.0,
 };
 function splitMarked(text) {
   const out = [];
@@ -1308,8 +1308,10 @@ function buildScore(text, opts = {}) {
       curT += dur;
       continue;
     }
-    const cd = (flatTiming ? (d.c ? 0.072 : 0.0) : (CDUR[d.c] || 0.0)) * rate * (mood === 2 ? 0.96 : 1.0);
-    let vd = (flatTiming ? 0.092 : (VDUR[d.v] || 0.088)) * rate * moodRate;
+    const isMedStop = !isPhraseStart && (d.c === "t" || d.c === "k" || d.c === "p" || d.c === "ch" || d.c === "ts");
+    const cd = (flatTiming ? (d.c ? 0.072 : 0.0) : (CDUR[d.c] || 0.0)) * rate * (mood === 2 ? 0.96 : 1.0) * (isMedStop ? 0.64 : 1.0);
+    const phrStretch = isUttEnd ? 1.48 : (isPhraseEnd ? 1.28 : (isPhraseStart ? 1.10 : 0.88));
+    let vd = (flatTiming ? 0.092 : (VDUR[d.v] || 0.088)) * rate * moodRate * (flatTiming ? 1.0 : phrStretch);
     const beforeFinalQ = nxt && nxt.kind === "Q" && (!nxt2 || nxt2.kind === "pau");
     const beforeFinalDevSu = !flatTiming && nxt && (i + 1 === dec.length - 1) && nxt.kind === "CV" && (nxt.c === "s" || nxt.c === "sh") && (nxt.v === "u" || nxt.v === "i");
     if (!flatTiming && isPhraseStart && pLen >= 2) vd *= 0.94;
@@ -1493,7 +1495,7 @@ function buildScore(text, opts = {}) {
       let sway;
       if (nama) {
         const pMix = c1 * pinkTract1[t] + s1 * pinkTract2[t];
-        sway = 1.0 + (j <= 4 ? 0.080 : 0.032) * pMix;
+        sway = 1.0 + (j <= 4 ? 0.024 : 0.010) * pMix;
       } else {
         const sec = t * fpz;
         sway = 1.0 + (j <= 4 ? 0.095 : 0.030) * Math.sin(2 * Math.PI * (0.65 + 0.032 * j) * sec + j * 0.72);
@@ -1787,16 +1789,16 @@ function buildScore(text, opts = {}) {
           const preDevBoost = (isVoicedUttEnd && !ev.isUttEnd) ? 2.22 : (isVoicedUttEnd ? 1.25 : 0.90);
           scoop_tr[t] = (0.45 * minJerk(scU) + 0.55 * scU * scU) * preDevBoost * moodBoost;
         }
-        const edge = 0.16 * minJerk(1.0 - vU * 4.5) + 0.18 * minJerk((vU - 0.82) / 0.18);
+        const edge = 0.05 * minJerk(1.0 - vU * 4.5) + 0.05 * minJerk((vU - 0.82) / 0.18);
         sigh_tr[t] = sTail;
         rd_tr[t] = rd_base + (rd_tail - rd_base) * sTail + 0.18 * edge + (ev.tilde ? 0.28 : 0.0) + (ev.mood === 3 && ev.fromEnd === 0 ? 0.36 : 0.0);
         const afterVL = VOICELESS.has(ev.c);
         const afterSoftC = ev.c === "h" || ev.c === "f";
         const afterGlide = ev.c === "w" || ev.c === "y";
-        const onsetRamp = afterSoftC ? Math.min(1.0, 0.45 + 1.45 * vU) : (afterVL ? Math.min(1.0, 0.66 + 1.40 * vU) : (afterGlide && ev.isPhraseStart ? Math.min(1.0, 0.90 + 0.25 * vU) : Math.min(1.0, 0.90 + 0.30 * vU)));
+        const onsetRamp = afterSoftC ? Math.min(1.0, 0.68 + 1.15 * vU) : (afterVL ? Math.min(1.0, 0.82 + 1.05 * vU) : Math.min(1.0, 0.95 + 0.18 * vU));
         const nucShape = Math.sin(Math.PI * Math.pow(Math.max(0, Math.min(1, vU)), 0.80));
         const moodGain = ev.mood === 2 ? 1.07 : (ev.mood === 3 && ev.fromEnd <= 1 ? (ev.fromEnd === 0 ? 0.72 : 0.86) : 1.0);
-        pLung_tr[t] *= softOn * onsetRamp * (0.87 + 0.19 * nucShape) * (V_PLUNG[ev.v] || 1.06) * moodGain;
+        pLung_tr[t] *= softOn * onsetRamp * (0.97 + 0.05 * nucShape) * (V_PLUNG[ev.v] || 1.06) * moodGain;
         const chinkTgt = ev.v === "a" ? 0.45 : 0.51;
         const chinkRamp = (bareStart || ev.v === "a") ? minJerk((sec - ev.cEnd) / 0.020) : 1.0;
         chink_tr[t] = 0.30 + (chinkTgt - 0.30) * chinkRamp;
@@ -1815,7 +1817,7 @@ function buildScore(text, opts = {}) {
       if (voicedBool[t]) {
         const bareShield = 1.0 - bareStart_tr[t];
         chink_tr[t] = Math.max(0.22, Math.min(0.62, chink_tr[t] + 0.065 * pb * bareShield));
-        breathDyn_tr[t] = Math.max(0.45, Math.min(1.65, breathDyn_tr[t] * (1.0 + 0.28 * pb * bareShield)));
+        breathDyn_tr[t] = Math.max(0.45, Math.min(1.65, breathDyn_tr[t] * (1.0 + 0.10 * pb * bareShield)));
       }
     }
   }
@@ -1977,11 +1979,11 @@ function buildScore(text, opts = {}) {
         ? ((ev.tilde ? 1.0 : 0.0) + (ev.kind === "long" ? 0.65 : 0.0) + ((ev.isUttEnd || (ev.isPhraseEnd && ev.pLen >= 2)) ? 0.75 : 0.0))
         : 0.0;
       vibPh += 2.0 * Math.PI * (5.3 + 0.85 * pink) * fpz;
-      const vibAmp = flatHz ? 0.0 : (0.04 + 0.24 * Math.min(1.0, tailVibW));
+      const vibAmp = flatHz ? 0.0 : (0.00 + 0.08 * Math.min(1.0, tailVibW));
       const tildeSwell = (ev && ev.tilde) ? 0.65 * Math.sin(Math.PI * Math.max(0, Math.min(1, (sec - ev.a) / Math.max(0.01, ev.e - ev.a)))) : 0.0;
       const hiF0Calm = nama && f0_fr[t] > 432.0 ? Math.min(1.0, (f0_fr[t] - 432.0) / 80.0) : 0.0;
-      const pinkGain = (flatHz ? 0.42 : 0.46) * (1.0 - 0.18 * hiF0Calm);
-      const muGain = flatHz ? 0.45 : (0.95 - 0.20 * hiF0Calm);
+      const pinkGain = (flatHz ? 0.14 : 0.16) * (1.0 - 0.18 * hiF0Calm);
+      const muGain = flatHz ? 0.12 : (0.18 - 0.04 * hiF0Calm);
       const microVib = nama
         ? (vibAmp * Math.sin(vibPh) + pinkGain * pink + muGain * mu1)
         : ((0.38 + 0.14 * Math.min(1.0, tailVibW)) * Math.sin(2 * Math.PI * 5.4 * sec + 0.4) + 1.38 * mu1);
@@ -1997,7 +1999,7 @@ function buildScore(text, opts = {}) {
       f0_fr[t] *= Math.pow(2.0, (cf0Sm[t] + vibArr[t]) / 12.0);
       if (voicedBool[t]) {
         const relF0 = Math.max(0.0, Math.min(1.0, (f0_fr[t] / Math.max(120.0, hz) - 0.82) / 0.40));
-        pLung_tr[t] *= 0.72 + 0.52 * relF0;
+        pLung_tr[t] *= 0.90 + 0.22 * relF0;
       }
     }
   }
@@ -2261,9 +2263,9 @@ function synthKuda(text, opts = {}) {
   let bHp = 0.0, bWPrev = 0.0, bLp1 = 0.0, bLp2 = 0.0, bLp3 = 0.0;
   let wallLp1 = 0.0, wallLp2 = 0.0, vWall1 = 0.0, vWall2 = 0.0;
   let roomLp1 = 0.0, roomLp2 = 0.0;
-  const wallLoss = 0.9989;
-  const cheekLoss = 0.9970;
-  const epiLoss = 0.9972;
+  const wallLoss = 0.99935;
+  const cheekLoss = 0.99860;
+  const epiLoss = 0.99875;
   const nasalLoss = 0.9920;
   const wgSR = 2 * srWg;
   const frameStepSamples = fpz * srWg;
@@ -2314,12 +2316,14 @@ function synthKuda(text, opts = {}) {
     const te = oq;
     const vFricBack = Math.max(vFricJW, vFricZW);
     const obsBackP = Math.max(vFricBack, vStopW);
-    const pCouple = Math.max(0.45, Math.min(1.8, 1.75 - 1.05 * Math.min(1.2, vo * pLung))); const ta1 = Math.max(0.011, Math.min(0.075, (0.016 * pCouple + 0.012 * Math.max(0, rdEff - 1.1) + 0.024 * sigh + 0.020 * vFricBack + 0.004 * vStopW) * (1.0 + 0.36 * cycMuc)));
-    const ta2 = 0.0049;
+    const f0Visco = Math.max(0.45, Math.min(2.15, Math.pow(f0 / 285.0, 1.35))); const pCouple = Math.max(0.38, Math.min(2.0, 1.85 - 1.18 * Math.min(1.2, vo * pLung))); const ta1 = Math.max(0.0055, Math.min(0.095, (0.0140 * pCouple + 0.011 * Math.max(0, rdEff - 1.1) + 0.022 * sigh + 0.018 * vFricBack + 0.004 * vStopW) * f0Visco * (1.0 + 0.36 * cycMuc)));
+    const ta2 = Math.max(0.0030, Math.min(0.012, 0.0049 * f0Visco));
     const lipArea = Math.max(0.015, A[M - 1]);
     const aLip = Math.sqrt(lipArea / Math.PI);
     const vlSibMask = Math.min(1.0, sibAlvF + sibPalF);
-    const fRad = Math.min(11500.0, (2150.0 - 750.0 * hiDamp * (1.0 - 0.40 * vlSibMask)) / Math.max(0.28, aLip));
+    const vlBurstMask = Math.min(1.0, burstDrive * 1.6 + broadF * 0.9);
+    const fRadBase = 2150.0 + 1500.0 * vlBurstMask;
+    const fRad = Math.min(12000.0, (fRadBase - 750.0 * hiDamp * (1.0 - 0.40 * vlSibMask)) / Math.max(0.28, aLip));
     const lipGain = Math.sqrt(lipArea / 3.0);
     const aR = Math.exp(-2.0 * Math.PI * fRad / wgSR);
     const aNos = Math.exp(-2.0 * Math.PI * 5600.0 / wgSR);
@@ -2373,7 +2377,7 @@ function synthKuda(text, opts = {}) {
       }
       const jitScale = (1.0 + 0.45 * fryAmt) * (1.0 + 1.85 * hopfFluct);
       const fryPer = 1.0 + 0.028 * fryAmt * cycParity;
-      const periodTicks = (wgSR / Math.max(70.0, f0 * (1.0 + 0.016 * jitScale * cycJit + hopfDetune))) * fryPer;
+      const periodTicks = (wgSR / Math.max(70.0, f0 * (1.0 + 0.0045 * jitScale * cycJit + hopfDetune))) * fryPer;
       ph += 1.0 / periodTicks;
       if (ph >= 1.0) {
         ph -= 1.0;
@@ -2384,7 +2388,7 @@ function synthKuda(text, opts = {}) {
         cycJit = 0.40 * cycJit + 0.91 * gRand;
         cycMuc = 0.30 * cycMuc + 0.95 * mRand;
         cycTp  = 0.30 * cycTp  + 0.95 * tRand;
-        cycShim = 0.46 * cycShim + 0.88 * (rng.random() - 0.5) * 0.072;
+        cycShim = 0.46 * cycShim + 0.88 * (rng.random() - 0.5) * 0.028;
       }
       let gp = 0.0;
       if (ph < te) {
@@ -2425,7 +2429,7 @@ function synthKuda(text, opts = {}) {
       const h2Mix = 0.16 + 0.49 * airAbduct;
       const hopfAir = vo * pLung * hopfAirTail * Math.min(0.055, effAsp) * (1.0 - 0.35 * hiDamp) * ((1.0 - h2Mix) * lpA2 + h2Mix * h2) * (3.4 + 0.4 * airAbduct);
       const glotJet = (vo * pLung * pLung * openMod * breathMult * (effAsp * (1.0 - 0.55 * hiDamp) * lpA2 * 0.11 + effAspMid * (1.0 - 0.22 * hiDamp) * mLp3 * 0.13) + hopfAir * 0.60 + glotH * 0.95);
-      const rg = (0.920 - 0.05 * hiDamp) - 0.130 * vo * Math.min(1.2, lpRet2);
+      const rg = (0.942 - 0.035 * hiDamp) - 0.098 * vo * Math.min(1.2, lpRet2);
       Rn[0] = (uGlot + glotJet) + rg * L[0];
       const tw = rng.uniform(-1.0, 1.0);
       const sy1 = 0.67 * (sH1 + tw - sW0); sW0 = tw; sH1 = sy1;
@@ -2443,11 +2447,11 @@ function synthKuda(text, opts = {}) {
       bLp2 = 0.15 * bLp1 + 0.85 * bLp2;
       bLp3 = 0.055 * bLp2 + 0.945 * bLp3;
       const voicedFricMod = 1.0;
-      const sibDip = 0.16 * (sibAlvF * (sL2 * 1.08 + bLp3 * 0.65) + sibPalF * (pL2 * 1.26 + bLp3 * 0.65) + voicedFricMod * (vSibAlvF * (sL2 * 0.74) + vSibPalF * (pL2 * 0.90)));
+      const sibDip = 0.12 * (sibAlvF * (sL2 * 1.08 + bLp3 * 0.85) + sibPalF * (pL2 * 1.26 + bLp3 * 0.85) + voicedFricMod * (vSibAlvF * (sL2 * 0.74) + vSibPalF * (pL2 * 0.90)));
       const burstNoise = (fJ === 27)
         ? (bLp2 * 0.88 + pL2 * 0.24 + sL2 * 0.14)
         : (fJ === 26 ? (bLp3 * 2.1 + bLp2 * 0.22) : (bLp2 * 1.22));
-      const brdDip = 0.32 * (broadF * (bLp2 * 1.85) + burstDrive * burstNoise);
+      const brdDip = 0.48 * broadF * (bLp2 * 1.85) + 0.54 * burstDrive * burstNoise;
       const turbDipole = (fJ > 4) ? (sibDip + brdDip) : 0.0;
       const fwdFrac = (sibAlvF + sibPalF + vSibAlvF + vSibPalF) > 0.15 ? 0.95 : 0.72;
       const epiHiDrop = 0.008 * hiDamp;
@@ -2531,14 +2535,57 @@ function synthKuda(text, opts = {}) {
     const y = rawOut[i] - dcX + 0.993 * dcY;
     dcX = rawOut[i]; dcY = y; rawOut[i] = y;
   }
-  for (const [apBase, apMod, fMod, ph0] of [[0.46, 0.25, 5.1, 0.3], [-0.40, 0.22, 7.3, 1.8], [0.28, 0.18, 9.7, 3.1]]) {
-    let ax1 = 0.0, ay1 = 0.0;
+  for (let s = 0; s < 20; s++) {
+    const fc = 650.0 * Math.pow(5800.0 / 650.0, s / 19.0);
+    const Q = 1.5 + 0.6 * (((s * 7) % 5) / 4.0);
+    const w0 = 2.0 * Math.PI * fc / srWg;
+    const alpha = Math.sin(w0) / (2.0 * Q);
+    const cosW = Math.cos(w0);
+    const a0 = 1.0 + alpha;
+    const b0 = (1.0 - alpha) / a0, b1 = (-2.0 * cosW) / a0, b2 = (1.0 + alpha) / a0;
+    const a1 = (-2.0 * cosW) / a0, a2 = (1.0 - alpha) / a0;
+    let x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
     for (let i = 0; i < N; i++) {
-      const fIdx = Math.min(n - 1, Math.floor(i / frameStepSamples));
-      const sec = i / srWg;
-      const ap = Math.max(-0.78, Math.min(0.78, apBase + 0.08 * Math.tanh((A_tr[fIdx][24] - 2.4) * 0.5) + apMod * Math.sin(2 * Math.PI * fMod * sec + ph0)));
-      const xi = rawOut[i], yi = ap * xi + ax1 - ap * ay1;
-      ax1 = xi; ay1 = yi; rawOut[i] = yi;
+      const xi = rawOut[i];
+      const yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = xi; y2 = y1; y1 = yi;
+      rawOut[i] = yi;
+    }
+  }
+  {
+    const dry = Float64Array.from(rawOut);
+    const taps = [
+      [Math.round(0.0011 * srWg),  0.10],
+      [Math.round(0.0027 * srWg), -0.07],
+      [Math.round(0.0049 * srWg),  0.05],
+      [Math.round(0.0079 * srWg), -0.032],
+      [Math.round(0.0113 * srWg),  0.020],
+    ];
+    let erLp = 0.0;
+    const aEr = Math.exp(-2.0 * Math.PI * 4200.0 / srWg);
+    const A = Math.pow(10.0, 2.0 / 40.0);
+    const w0 = 2.0 * Math.PI * 4600.0 / srWg;
+    const cosW = Math.cos(w0), sinW = Math.sin(w0);
+    const alpha = sinW * 0.5 * Math.SQRT2;
+    const sqA = Math.sqrt(A);
+    const b0 = A * ((A + 1.0) + (A - 1.0) * cosW + 2.0 * sqA * alpha);
+    const b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cosW);
+    const b2 = A * ((A + 1.0) + (A - 1.0) * cosW - 2.0 * sqA * alpha);
+    const a0 = (A + 1.0) - (A - 1.0) * cosW + 2.0 * sqA * alpha;
+    const a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cosW);
+    const a2 = (A + 1.0) - (A - 1.0) * cosW - 2.0 * sqA * alpha;
+    let sx1 = 0.0, sx2 = 0.0, sy1 = 0.0, sy2 = 0.0;
+    for (let i = 0; i < N; i++) {
+      let erRaw = 0.0;
+      for (let ti = 0; ti < taps.length; ti++) {
+        const d = taps[ti][0];
+        if (i >= d) erRaw += dry[i - d] * taps[ti][1];
+      }
+      erLp = (1.0 - aEr) * erRaw + aEr * erLp;
+      const mix = dry[i] * 0.93 + erLp;
+      const y = (b0 * mix + b1 * sx1 + b2 * sx2 - a1 * sy1 - a2 * sy2) / a0;
+      sx2 = sx1; sx1 = mix; sy2 = sy1; sy1 = y;
+      rawOut[i] = y;
     }
   }
   {
