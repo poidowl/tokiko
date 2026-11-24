@@ -2,7 +2,7 @@
 
 **Virtual Vocal Organ — KUDA (`kuda.mjs`)**
 
-学習済み重み 0 バイト・外部依存 0・静的 `import` 0 の、単一ファイル純 JavaScript（約 68 KB）による **4 分岐ケリー・ロックバウム物理声道管** 日本語音声合成エンジンです。
+学習済み重み 0 バイト・外部依存 0・静的 `import` 0 の、単一ファイル純 JavaScript（約 69 KB）による **4 分岐ケリー・ロックバウム物理声道管** 日本語音声合成エンジンです。
 
 Node.js / ブラウザの両方でそのまま動作し、発声器官の全ソースコードをローカル LLM のコンテキストに丸ごと収容できるサイズに保っています。
 
@@ -31,6 +31,8 @@ node kuda.mjs -o romaji.wav "konnichiwa, sekai! JavaScript de shabette ma-su!"
 node kuda.mjs --preset genki -o genki.wav "しじゅほ'ーしょー、げ'っと/す'っぞ！"
 node kuda.mjs --preset amae --sr 44100 -o amae.wav "おはよう、きょうは、いいてんきだね"
 ```
+
+`--seed N`（既定 2024、同じ seed なら同じ波形）も使えます。知らないオプションはテキストとして読まずにエラー終了します。
 
 ### ESM（Node.js / ブラウザ共通）
 

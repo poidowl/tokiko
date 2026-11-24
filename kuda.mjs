@@ -24,7 +24,7 @@
  * 動作環境:
  *   Node.js / ブラウザ両対応の完全1ファイル独立 ESM (外部 import ゼロ)。
  *   - ESM: `import { synthKuda } from "./kuda.mjs"; const { wav, samples, sr } = synthKuda("こんにちは");`
- *   - CLI: `node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] -o out.wav "テキスト"`
+ *   - CLI: `node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] [--seed N] -o out.wav "テキスト"`
  */
 export const SR = 44100;
 const FP = 5.0;
