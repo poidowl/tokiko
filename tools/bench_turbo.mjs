@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Reproducible benchmark & regression suite comparing a baseline git ref (default: main)
+// Reproducible benchmark & regression suite comparing a baseline git ref (default: pinned nama revision)
 // against the working tree kuda.mjs.
-// Usage: node tools/bench_turbo.mjs [--base main] [--warmup 8] [--runs 12]
+// Usage: node tools/bench_turbo.mjs [--base <ref>] [--warmup 8] [--runs 12]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +14,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 
 const args = process.argv.slice(2);
-let baseRef = "main";
+let baseRef = "34bc0821224be9b918984c305414bc3276242d5f";
 let warmup = 8;
 let runs = 12;
 for (let i = 0; i < args.length; i++) {
