@@ -10,7 +10,7 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3";
-const PLAYER_REV = "v0.1.3-host1";
+const PLAYER_REV = "v0.1.3-live1";
 const VERSION_NOTE = "20段の位相分散で声がなめらかに ＋ 約1.25倍速 ＋ CLIの不明オプションはエラーに・--seed追加";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
@@ -405,6 +405,9 @@ const playerHtml = `<!DOCTYPE html>
   @media (max-height: 390px) { body { overflow-y:auto; } .card { min-height:390px; } }
   @media (prefers-reduced-motion: reduce) { .autoplay-pill, .card:has(.play-btn.playing) .face::after { animation:none; } }
   .host-row { display:flex; align-items:center; gap:7px; flex:none; color:var(--text); font-size:11px; }
+  #hostLine { border-radius:6px; padding:3px 5px; }
+  #hostLine.speaking { background:#483458; color:#fff4bd; font-weight:800; box-shadow:inset 3px 0 #ffa9bf; }
+  #synthStat { font-weight:700; color:var(--text); }
   .host-row button { flex:none; }
   .host-row button[aria-pressed="true"] { background:#cab6f5; color:#30263c; }
   .input-row { align-items:center; gap:9px; }
@@ -456,7 +459,6 @@ const playerHtml = `<!DOCTYPE html>
       <span id="tractHud">声道管 M=31+23+10+3</span>
       <span id="waveHud">波形 / FFT 0–6kHz</span>
     </div>
-    <div id="autoPill" class="autoplay-pill" hidden>🔊 タップでしゃべる</div>
   </div>
 
   <div class="controls-bar">
@@ -492,8 +494,8 @@ const playerHtml = `<!DOCTYPE html>
   <footer class="ver-foot">
     <div class="ver-top">
       <div><span class="ver-badge">${VERSION}</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
-      <span id="synthStat">待機中 · 24kHz</span>
     </div>
+    <div id="synthStat" role="status">この文の WAV はまだ 0 B</div>
     <div class="ver-note" title="${VERSION_NOTE}">変更: ${VERSION_NOTE}</div>
   </footer>
 </div>
@@ -509,7 +511,6 @@ const elPlay = document.getElementById("playBtn");
 const elScope = document.getElementById("scope");
 const elTractHud = document.getElementById("tractHud");
 const elWaveHud = document.getElementById("waveHud");
-const elAutoPill = document.getElementById("autoPill");
 const elSynthStat = document.getElementById("synthStat");
 const elSeed = document.getElementById("seedBtn");
 const slHz = document.getElementById("slHz");
@@ -534,8 +535,7 @@ let playStartAt = 0;
 let playDur = 0;
 let cachedKey = "";
 let cached = null; // { res, sc, synthMs, trimStartSec, trimDurSec }
-let autoPlayDone = false;
-let awaitingUnlock = false;
+
 
 function getSpeed() {
   return Math.pow(2, Number(slRate.value));
@@ -593,16 +593,31 @@ function updateKnobText() {
   rateVal.textContent = getSpeed().toFixed(2) + "x";
 }
 
+function resSize(res) {
+  return res.wav.byteLength.toLocaleString("ja-JP") + " B";
+}
+
+function clearTake() {
+  stopPlay();
+  cached = null;
+  cachedKey = "";
+  elSynthStat.textContent = "この文の WAV はまだ 0 B";
+  drawScope(-1);
+}
+
 function synthesizeIfNeeded() {
   const txt = (elInput.value || "").trim() || "こんにちは";
   const opts = getOpts();
   const key = JSON.stringify([txt, opts]);
-  if (cached && cachedKey === key) return cached;
+  if (cached && cachedKey === key) {
+    elSynthStat.textContent = "生成済み WAV · " + resSize(cached.res) + "（再利用）";
+    return cached;
+  }
 
-  const t0 = performance.now();
   const presetObj = KUDA_PRESETS[opts.preset] || KUDA_PRESETS.kawaii;
   const merged = Object.assign({}, presetObj, opts);
   const sc = buildScore(txt, merged);
+  const t0 = performance.now();
   const res = synthKuda(txt, opts);
   const synthMs = Math.max(1, Math.round(performance.now() - t0));
 
@@ -626,7 +641,7 @@ function synthesizeIfNeeded() {
     trimStartSec: a / sr,
     trimDurSec: trimmed.length / sr,
   };
-  elSynthStat.textContent = "合成 " + synthMs + "ms · " + (trimmed.length / sr).toFixed(2) + "s · 24kHz";
+  elSynthStat.textContent = "WAV  0 B → " + resSize(res) + " ｜ 合成 " + synthMs + " ms";
   return cached;
 }
 
@@ -643,17 +658,6 @@ function ensureAudio() {
   return audioCtx;
 }
 
-function hideAutoPrompt() {
-  awaitingUnlock = false;
-  if (elAutoPill) elAutoPill.hidden = true;
-}
-
-function showAutoPrompt() {
-  if (autoPlayDone) return;
-  awaitingUnlock = true;
-  if (elAutoPill) elAutoPill.hidden = false;
-}
-
 // The host has its own source so it can be silenced independently of the demo.
 const hostToggle = document.getElementById("hostToggle");
 const hostLine = document.getElementById("hostLine");
@@ -663,6 +667,7 @@ let hostSource = null;
 let hostWelcomed = false;
 
 function stopHost() {
+  hostLine.classList.remove("speaking");
   if (!hostSource) return;
   hostSource.onended = null;
   hostSource.stop();
@@ -692,24 +697,27 @@ function reportTake(data, reused) {
   const digits = ["れい","いち","に","さん","よん","ご","ろく","なな","はち","きゅう"];
   const spoken = Array.from(seconds, ch => ch === "." ? "てん" : digits[Number(ch)]).join("");
   const words = greeting + (reused ? "つくっておいたこえ。ごうせいは、" : "いまのごうせいは、") + spoken + "びょう！";
-  const voice = synthKuda(words, { preset:"genki", hz:235, srOut:24000, seed:17 });
+  const voice = synthKuda(words, { preset:"genki", hz:235, rate:0.72, srOut:24000, seed:17 });
   const buffer = audioCtx.createBuffer(1, voice.samples.length, voice.sr);
   buffer.getChannelData(0).set(voice.samples);
   const source = audioCtx.createBufferSource();
   source.buffer = buffer;
   source.connect(audioCtx.destination);
   hostSource = source;
+  hostLine.classList.add("speaking");
   source.onended = () => {
     source.disconnect();
-    if (hostSource === source) hostSource = null;
+    if (hostSource === source) {
+      hostSource = null;
+      hostLine.classList.remove("speaking");
+    }
   };
   source.start();
 }
 
 function stopPlay() {
   stopHost();
-  autoPlayDone = true;
-  hideAutoPrompt();
+
   if (curSource) {
     try { curSource.stop(); } catch (_) {}
     try { curSource.disconnect(); } catch (_) {}
@@ -794,7 +802,21 @@ function drawScope(progress) {
   ctx.lineTo(splitX + 0.5, h - 8);
   ctx.stroke();
 
-  if (!cached) { ctx.restore(); return; }
+  if (!cached) {
+    elTractHud.textContent = "音声未生成";
+    elWaveHud.textContent = "WAV · 0 B";
+    ctx.fillStyle = "#272235";
+    ctx.fillRect(0, 20, w, h - 20);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffd278";
+    ctx.font = "bold 22px monospace";
+    ctx.fillText("0 B", w / 2, h / 2);
+    ctx.font = "13px sans-serif";
+    ctx.fillStyle = "#e2d6ea";
+    ctx.fillText("「しゃべる」で、この文から声をつくる", w / 2, h / 2 + 25);
+    ctx.restore();
+    return;
+  }
   const { sc, trimmed, trimStartSec, trimDurSec } = cached;
 
   // --- LEFT: Real-time 4-Branch Kelly-Lochbaum Vocal Tract Cross-Section ---
@@ -981,7 +1003,7 @@ elPlay.addEventListener("click", () => {
   if (curSource) stopPlay(); else startPlay();
 });
 elInput.addEventListener("pointerdown", () => { if (curSource) stopPlay(); });
-elInput.addEventListener("input", () => { if (curSource) stopPlay(); });
+elInput.addEventListener("input", clearTake);
 elInput.addEventListener("focus", () => { if (curSource) stopPlay(); });
 elInput.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); startPlay(); }
@@ -1013,7 +1035,7 @@ presetBtns.forEach((btn) => {
 });
 
 for (const sl of [slHz, slBreath, slRate]) {
-  sl.addEventListener("input", updateKnobText);
+  sl.addEventListener("input", () => { updateKnobText(); clearTake(); });
   sl.addEventListener("change", () => startPlay());
 }
 
@@ -1037,56 +1059,9 @@ window.addEventListener("message", (ev) => {
 
 window.addEventListener("resize", () => drawScope(-1));
 
-// Fallback unlock: if browser autoplay policy holds AudioContext suspended, speak on first tap anywhere
-const onFirstGesture = (ev) => {
-  if (!awaitingUnlock || autoPlayDone) return;
-  const t = ev.target;
-  const isInteractive = t && t.closest && t.closest("button, input, a, label, #scope");
-  if (isInteractive) {
-    autoPlayDone = true;
-    hideAutoPrompt();
-    return;
-  }
-  startPlay();
-};
-window.addEventListener("pointerdown", onFirstGesture, { capture: true });
-window.addEventListener("keydown", onFirstGesture, { capture: true });
-
-// Boot: immediately synthesize & attempt auto-speak on open (with clean autoplay-policy fallback)
+// Keep the first waveform empty until an explicit play or WAV export.
 updateKnobText();
-(() => {
-  const params = new URLSearchParams(window.location.search || "");
-  const wantAuto = params.get("autoplay") !== "0";
-  const ctx = wantAuto ? ensureAudio() : null;
-  const resumeP = (ctx && ctx.state === "suspended")
-    ? ctx.resume().catch(() => {})
-    : Promise.resolve();
-
-  synthesizeIfNeeded();
-  drawScope(-1);
-
-  if (!wantAuto || !ctx) return;
-
-  const launchIfReady = () => {
-    if (!autoPlayDone && ctx.state === "running") {
-      startPlay();
-      return true;
-    }
-    return false;
-  };
-
-  if (launchIfReady()) return;
-
-  ctx.addEventListener("statechange", () => {
-    launchIfReady();
-  });
-  resumeP.then(() => {
-    if (!launchIfReady() && !autoPlayDone) showAutoPrompt();
-  });
-  setTimeout(() => {
-    if (!autoPlayDone && !launchIfReady()) showAutoPrompt();
-  }, 180);
-})();
+drawScope(-1);
 })();
 </script>
 </body>
