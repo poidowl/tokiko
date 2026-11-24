@@ -1567,22 +1567,25 @@ if (typeof process !== "undefined" && process.versions?.node && process.argv?.[1
   if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const fs = await import("node:fs");
     const args = process.argv.slice(2);
-    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, textParts = [];
+    let outPath = "kuda_out.wav", preset = "kawaii", srOut = 24000, flatHz = null, seed = 2024, textParts = [], optsDone = false;
+    const usage = "使い方: node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] [--seed N] -o out.wav [--] \"テキスト\"";
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
-      if ((a === "-o" || a === "--out") && args[i + 1]) { outPath = args[++i]; }
-      else if (a === "--preset" && args[i + 1]) { preset = args[++i]; }
-      else if (a === "--sr" && args[i + 1]) { srOut = Number(args[++i]) || 24000; }
-      else if (a === "--flat" && args[i + 1]) { flatHz = Number(args[++i]) || null; }
-      else if (a === "-h" || a === "--help") {
-        console.log("使い方: node kuda.mjs [--preset kawaii|amae|genki] [--sr 24000|44100] [--flat Hz] -o out.wav \"テキスト\"");
-        process.exit(0);
-      } else {
-        textParts.push(a);
-      }
+      if (optsDone || !a.startsWith("-") || a === "-") { textParts.push(a); continue; }
+      if (a === "--") { optsDone = true; continue; }
+      if (a === "-h" || a === "--help") { console.log(usage); process.exit(0); }
+      const val = args[i + 1];
+      if (!["-o", "--out", "--preset", "--sr", "--flat", "--seed"].includes(a)) { console.error(`kuda: 未知のオプション ${a}\n${usage}`); process.exit(2); }
+      if (val === undefined) { console.error(`kuda: ${a} に値がありません\n${usage}`); process.exit(2); }
+      i++;
+      if (a === "-o" || a === "--out") outPath = val;
+      else if (a === "--preset") preset = val;
+      else if (a === "--sr") srOut = Number(val) || 24000;
+      else if (a === "--flat") flatHz = Number(val) || null;
+      else if (a === "--seed") seed = Number.isFinite(Number(val)) ? Number(val) : 2024;
     }
     const text = textParts.join(" ") || "わたし、にほんご、ちょっとしゃべれます";
-    const res = synthKuda(text, { preset, srOut, flatHz });
+    const res = synthKuda(text, { preset, srOut, flatHz, seed });
     fs.writeFileSync(outPath, res.wav);
     console.log(`KUDA (${preset}, ${res.sr}Hz): wrote ${outPath} (${res.wav.byteLength} bytes, ${(res.samples.length / res.sr).toFixed(2)}s)`);
   }
