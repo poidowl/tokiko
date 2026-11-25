@@ -10,13 +10,15 @@ const OUT_DIR = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const VERSION = "v0.1.3";
-const PLAYER_REV = "v0.1.3";
+const PLAYER_REV = "v0.1.3-live1";
 const VERSION_NOTE = "20段の位相分散で声がなめらかに ＋ 約1.25倍速 ＋ CLIの不明オプションはエラーに・--seed追加";
 const PAGES_BASE = "https://poidowl.github.io/tokiko";
 const REPO_URL = "https://github.com/poidowl/tokiko";
 
 let rawSrc = fs.readFileSync(path.join(ROOT, "kuda.mjs"), "utf8");
-const ENGINE_KB = Math.round(Buffer.byteLength(rawSrc, "utf8") / 1000);
+const bytes = (text) => Buffer.byteLength(text, "utf8");
+const kb = (text) => (bytes(text) / 1000).toFixed(1) + " kB";
+const exactSize = (text) => bytes(text).toLocaleString("en-US") + " B";
 
 // Strip shebang, Node.js CLI footer (contains top-level await), and ES module `export ` keywords
 let engineSrc = rawSrc
@@ -37,24 +39,24 @@ const playerHtml = `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <link rel="canonical" href="${PAGES_BASE}/">
 <title>tokiko / KUDA ${VERSION} — 仮想発声器官 プレイヤー</title>
 <style>
   :root {
-    --bg: #0c0f12;
-    --surface: #141920;
-    --raised: #1b222c;
-    --border: #252e3a;
-    --border-hi: #344152;
-    --text: #f2ede4;
-    --muted: #8f9ba8;
-    --dim: #657180;
-    --accent: #e85d3f;
-    --accent-hi: #f27256;
-    --brass: #d99b38;
-    --teal: #2ca58d;
+    --bg: #ffdf92;
+    --surface: #fff6db;
+    --raised: #ffd178;
+    --border: #997f75;
+    --border-hi: #453449;
+    --text: #30263c;
+    --muted: #574958;
+    --dim: #655664;
+    --accent: #ff897d;
+    --accent-hi: #ffa598;
+    --brass: #79413e;
+    --teal: #116e65;
     --teal-dim: rgba(44, 165, 141, 0.16);
     --brass-dim: rgba(217, 155, 56, 0.16);
   }
@@ -377,6 +379,49 @@ const playerHtml = `<!DOCTYPE html>
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .card { background: linear-gradient(155deg,#ffe9a8,#ffd27e); }
+  .brand { align-items: center; }
+  .brand h1 { font: 900 23px/1 system-ui,sans-serif; letter-spacing: -.075em; }
+  .face { position: relative; width: 28px; height: 24px; flex: none; border: 2px solid #40344a; border-radius: 8px; background: #8ddbc7; transform: rotate(-7deg); }
+  .face::before { content: ""; position: absolute; top: 5px; left: 5px; width: 3px; height: 4px; border-radius: 2px; background: #40344a; box-shadow: 10px 0 #40344a; }
+  .face::after { content: ""; position: absolute; left: 8px; bottom: 4px; width: 8px; height: 4px; border-radius: 0 0 6px 6px; background: #40344a; }
+  .card:has(.play-btn.playing) .face::after { height: 8px; border-radius: 50%; animation: chatter .24s ease-in-out infinite alternate; transform-origin: bottom; }
+  @keyframes chatter { to { transform: scaleY(.45); } }
+  .play-btn, .sample-btn { border: 1.5px solid #453449; box-shadow: 0 2px #453449; }
+  .play-btn, .play-btn.playing { color: #30263c; }
+  .play-btn.playing { background: #89dbc6; }
+  .sample-btn.active { background: #ffd079; border-color: #453449; }
+  .scope-box { border: 3px solid #453449; border-radius: 15px; box-shadow: 0 2px #8b6c64; }
+  .scope-hud { color: #e2d6ea; }
+  .presets { border-radius: 9px; background: #fff8e4; }
+  .preset-btn.active { color: #30263c; box-shadow: inset 0 0 0 1px #453449; }
+  [data-preset="kawaii"].active { background: #ffa9bf; }
+  [data-preset="amae"].active { background: #cab6f5; }
+  [data-preset="genki"].active { background: #8addbd; }
+  .knobs { border-radius: 12px; }
+  :focus-visible { outline: 3px solid #614898; outline-offset: 1px; }
+  @media (max-width: 380px) { .brand .tag { display:none; } }
+  @media (max-height: 390px) { body { overflow-y:auto; } .card { min-height:390px; } }
+  @media (prefers-reduced-motion: reduce) { .autoplay-pill, .card:has(.play-btn.playing) .face::after { animation:none; } }
+  .host-row { display:flex; align-items:center; gap:7px; flex:none; color:var(--text); font-size:11px; }
+  #hostLine { border-radius:6px; padding:3px 5px; }
+  #hostLine.speaking { background:#483458; color:#fff4bd; font-weight:800; box-shadow:inset 3px 0 #ffa9bf; }
+  #synthStat { font-weight:700; color:var(--text); }
+  .host-row button { flex:none; }
+  .host-row button[aria-pressed="true"] { background:#cab6f5; color:#30263c; }
+  .input-row { align-items:center; gap:9px; }
+  .input-row .play-btn { align-self:stretch; }
+  .bubble { position:relative; flex:1; min-width:0; border:2px solid #453449; border-radius:12px; background:#fff9e8; }
+  .bubble::after { content:""; position:absolute; right:-5px; top:50%; width:7px; height:7px; background:#fff9e8; border:solid #453449; border-width:2px 2px 0 0; transform:translateY(-50%) rotate(45deg); }
+  .bubble:focus-within { outline:2px solid #614898; }
+  .bubble input { width:100%; background:transparent; border:0; outline:none; }
+  .caption-window { display:none; position:absolute; inset:0 7px; overflow:hidden; pointer-events:none; }
+  #captionText { position:absolute; left:100%; top:50%; white-space:pre; font-size:14px; font-weight:700; }
+  @media (prefers-reduced-motion:no-preference) {
+    .card:has(.playing) .caption-window { display:block; }
+    .card:has(.playing) .bubble input { opacity:0; }
+  }
 </style>
 </head>
 <body>
@@ -387,14 +432,18 @@ const playerHtml = `<!DOCTYPE html>
       <span class="tag">KUDA · 仮想発声器官</span>
     </div>
     <div class="meta-right">
-      <span class="stat-chip">${ENGINE_KB}KB · 0B</span>
+      <span class="stat-chip">ソース ${kb(rawSrc)}</span>
       <a class="gh-link" href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
     </div>
   </div>
 
   <div class="input-row">
-    <input id="kanaInput" class="kana-input" type="text" value="ジャバスクリプトで、しゃべってまーす！" placeholder="かな / Romaji OK (e.g. konnichiwa!)" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ・ローマ字）">
     <button id="playBtn" class="play-btn" type="button">▶ しゃべる</button>
+    <div class="bubble">
+      <input id="kanaInput" class="kana-input" type="text" value="ジャバスクリプトで、しゃべってまーす！" placeholder="かな / Romaji OK (e.g. konnichiwa!)" spellcheck="false" aria-label="読み上げテキスト（ひらがな・カタカナ・ローマ字）">
+      <div class="caption-window" aria-hidden="true"><span id="captionText"></span></div>
+    </div>
+    <span class="face" aria-hidden="true"></span>
   </div>
 
   <div class="samples">
@@ -410,7 +459,6 @@ const playerHtml = `<!DOCTYPE html>
       <span id="tractHud">声道管 M=31+23+10+3</span>
       <span id="waveHud">波形 / FFT 0–6kHz</span>
     </div>
-    <div id="autoPill" class="autoplay-pill" hidden>🔊 タップでしゃべる</div>
   </div>
 
   <div class="controls-bar">
@@ -439,11 +487,15 @@ const playerHtml = `<!DOCTYPE html>
     </label>
   </div>
 
+  <div class="host-row">
+    <button id="hostToggle" class="mini-btn" type="button" aria-pressed="true" aria-label="司会の声">司会 ON</button>
+    <span id="hostLine" role="status">ようこそ。声ができるまでの時間を実況するで！</span>
+  </div>
   <footer class="ver-foot">
     <div class="ver-top">
       <div><span class="ver-badge">${VERSION}</span> <span>Pure JS 4分岐ケリー・ロックバウム導波管</span></div>
-      <span id="synthStat">待機中 · 24kHz</span>
     </div>
+    <div id="synthStat" role="status">この文の WAV はまだ 0 B</div>
     <div class="ver-note" title="${VERSION_NOTE}">変更: ${VERSION_NOTE}</div>
   </footer>
 </div>
@@ -459,7 +511,6 @@ const elPlay = document.getElementById("playBtn");
 const elScope = document.getElementById("scope");
 const elTractHud = document.getElementById("tractHud");
 const elWaveHud = document.getElementById("waveHud");
-const elAutoPill = document.getElementById("autoPill");
 const elSynthStat = document.getElementById("synthStat");
 const elSeed = document.getElementById("seedBtn");
 const slHz = document.getElementById("slHz");
@@ -484,8 +535,7 @@ let playStartAt = 0;
 let playDur = 0;
 let cachedKey = "";
 let cached = null; // { res, sc, synthMs, trimStartSec, trimDurSec }
-let autoPlayDone = false;
-let awaitingUnlock = false;
+
 
 function getSpeed() {
   return Math.pow(2, Number(slRate.value));
@@ -543,16 +593,31 @@ function updateKnobText() {
   rateVal.textContent = getSpeed().toFixed(2) + "x";
 }
 
+function resSize(res) {
+  return res.wav.byteLength.toLocaleString("ja-JP") + " B";
+}
+
+function clearTake() {
+  stopPlay();
+  cached = null;
+  cachedKey = "";
+  elSynthStat.textContent = "この文の WAV はまだ 0 B";
+  drawScope(-1);
+}
+
 function synthesizeIfNeeded() {
   const txt = (elInput.value || "").trim() || "こんにちは";
   const opts = getOpts();
   const key = JSON.stringify([txt, opts]);
-  if (cached && cachedKey === key) return cached;
+  if (cached && cachedKey === key) {
+    elSynthStat.textContent = "生成済み WAV · " + resSize(cached.res) + "（再利用）";
+    return cached;
+  }
 
-  const t0 = performance.now();
   const presetObj = KUDA_PRESETS[opts.preset] || KUDA_PRESETS.kawaii;
   const merged = Object.assign({}, presetObj, opts);
   const sc = buildScore(txt, merged);
+  const t0 = performance.now();
   const res = synthKuda(txt, opts);
   const synthMs = Math.max(1, Math.round(performance.now() - t0));
 
@@ -576,7 +641,7 @@ function synthesizeIfNeeded() {
     trimStartSec: a / sr,
     trimDurSec: trimmed.length / sr,
   };
-  elSynthStat.textContent = "合成 " + synthMs + "ms · " + (trimmed.length / sr).toFixed(2) + "s · 24kHz";
+  elSynthStat.textContent = "WAV  0 B → " + resSize(res) + " ｜ 合成 " + synthMs + " ms";
   return cached;
 }
 
@@ -593,20 +658,66 @@ function ensureAudio() {
   return audioCtx;
 }
 
-function hideAutoPrompt() {
-  awaitingUnlock = false;
-  if (elAutoPill) elAutoPill.hidden = true;
+// The host has its own source so it can be silenced independently of the demo.
+const hostToggle = document.getElementById("hostToggle");
+const hostLine = document.getElementById("hostLine");
+let hostEnabled = true;
+try { hostEnabled = localStorage.getItem("tokiko.host") !== "off"; } catch (_) {}
+let hostSource = null;
+let hostWelcomed = false;
+
+function stopHost() {
+  hostLine.classList.remove("speaking");
+  if (!hostSource) return;
+  hostSource.onended = null;
+  hostSource.stop();
+  hostSource.disconnect();
+  hostSource = null;
 }
 
-function showAutoPrompt() {
-  if (autoPlayDone) return;
-  awaitingUnlock = true;
-  if (elAutoPill) elAutoPill.hidden = false;
+function showHostSetting() {
+  hostToggle.setAttribute("aria-pressed", String(hostEnabled));
+  hostToggle.textContent = hostEnabled ? "司会 ON" : "司会 OFF";
+  hostLine.hidden = !hostEnabled;
+}
+showHostSetting();
+hostToggle.addEventListener("click", () => {
+  hostEnabled = !hostEnabled;
+  stopHost();
+  showHostSetting();
+  try { localStorage.setItem("tokiko.host", hostEnabled ? "on" : "off"); } catch (_) {}
+});
+
+function reportTake(data, reused) {
+  if (!hostEnabled) return;
+  const seconds = (data.synthMs / 1000).toFixed(2);
+  const greeting = hostWelcomed ? "" : "ようこそ！ ";
+  hostWelcomed = true;
+  hostLine.textContent = greeting + (reused ? "保存済みの声。生成時は " : "ただいまの合成は ") + seconds + " 秒！";
+  const digits = ["れい","いち","に","さん","よん","ご","ろく","なな","はち","きゅう"];
+  const spoken = Array.from(seconds, ch => ch === "." ? "てん" : digits[Number(ch)]).join("");
+  const words = greeting + (reused ? "つくっておいたこえ。ごうせいは、" : "いまのごうせいは、") + spoken + "びょう！";
+  const voice = synthKuda(words, { preset:"genki", hz:235, rate:0.72, srOut:24000, seed:17 });
+  const buffer = audioCtx.createBuffer(1, voice.samples.length, voice.sr);
+  buffer.getChannelData(0).set(voice.samples);
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+  hostSource = source;
+  hostLine.classList.add("speaking");
+  source.onended = () => {
+    source.disconnect();
+    if (hostSource === source) {
+      hostSource = null;
+      hostLine.classList.remove("speaking");
+    }
+  };
+  source.start();
 }
 
 function stopPlay() {
-  autoPlayDone = true;
-  hideAutoPrompt();
+  stopHost();
+
   if (curSource) {
     try { curSource.stop(); } catch (_) {}
     try { curSource.disconnect(); } catch (_) {}
@@ -620,6 +731,7 @@ function stopPlay() {
 
 function startPlay() {
   stopPlay();
+  const previous = cached;
   const data = synthesizeIfNeeded();
   const ctx = ensureAudio();
   if (!ctx) return;
@@ -639,6 +751,9 @@ function startPlay() {
     }).catch(() => {});
   }
 
+  const caption = document.getElementById("captionText");
+  caption.textContent = elInput.value.trim() || "こんにちは";
+  caption.style.transform = "translate(0%, -50%)";
   elPlay.classList.add("playing");
   elPlay.textContent = "■ 停止";
 
@@ -649,6 +764,7 @@ function startPlay() {
       elPlay.classList.remove("playing");
       elPlay.textContent = "▶ しゃべる";
       drawScope(-1);
+      reportTake(data, previous === data);
     }
   };
   src.start();
@@ -657,6 +773,7 @@ function startPlay() {
     if (!curSource) return;
     const elapsed = ctx.currentTime - playStartAt;
     const prog = Math.max(0, Math.min(1, elapsed / Math.max(0.01, playDur)));
+    caption.style.transform = "translate(" + (-100 * prog) + "%, -50%)";
     drawScope(prog);
     if (prog < 1) rafId = requestAnimationFrame(tick);
   };
@@ -674,18 +791,32 @@ function drawScope(progress) {
   const ctx = elScope.getContext("2d");
   ctx.save();
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = "#080b0e";
+  ctx.fillStyle = "#272235";
   ctx.fillRect(0, 0, w, h);
 
   const splitX = Math.round(w * 0.52);
-  ctx.strokeStyle = "#1d2530";
+  ctx.strokeStyle = "#443b54";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(splitX + 0.5, 8);
   ctx.lineTo(splitX + 0.5, h - 8);
   ctx.stroke();
 
-  if (!cached) { ctx.restore(); return; }
+  if (!cached) {
+    elTractHud.textContent = "音声未生成";
+    elWaveHud.textContent = "WAV · 0 B";
+    ctx.fillStyle = "#272235";
+    ctx.fillRect(0, 20, w, h - 20);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffd278";
+    ctx.font = "bold 22px monospace";
+    ctx.fillText("0 B", w / 2, h / 2);
+    ctx.font = "13px sans-serif";
+    ctx.fillStyle = "#e2d6ea";
+    ctx.fillText("「しゃべる」で、この文から声をつくる", w / 2, h / 2 + 25);
+    ctx.restore();
+    return;
+  }
   const { sc, trimmed, trimStartSec, trimDurSec } = cached;
 
   // --- LEFT: Real-time 4-Branch Kelly-Lochbaum Vocal Tract Cross-Section ---
@@ -754,7 +885,7 @@ function drawScope(progress) {
   ctx.closePath();
   ctx.fillStyle = "rgba(217, 155, 56, " + (0.14 + 0.16 * vo).toFixed(3) + ")";
   ctx.fill();
-  ctx.strokeStyle = vo > 0.25 ? "#d99b38" : "#8f9ba8";
+  ctx.strokeStyle = vo > 0.25 ? "#ffd278" : "#8f9ba8";
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
@@ -776,7 +907,7 @@ function drawScope(progress) {
   }
 
   // Tract labels
-  ctx.fillStyle = "#657180";
+  ctx.fillStyle = "#c0afc9";
   ctx.font = "9.5px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.fillText("声門", tx0, h - 6);
   ctx.fillText("鼻腔", tx1 - 24, nasalY - 9);
@@ -788,14 +919,14 @@ function drawScope(progress) {
   // --- RIGHT TOP: Waveform + Playhead ---
   const rx0 = splitX + 10, rw = Math.max(24, w - rx0 - 10);
   const wy0 = 22, wh = Math.round((h - 32) * 0.46), wcy = wy0 + wh * 0.5;
-  ctx.strokeStyle = "#18202a";
+  ctx.strokeStyle = "#443b54";
   ctx.beginPath();
   ctx.moveTo(rx0, wcy);
   ctx.lineTo(rx0 + rw, wcy);
   ctx.stroke();
 
   const step = Math.max(1, Math.floor(trimmed.length / rw));
-  ctx.strokeStyle = "#2ca58d";
+  ctx.strokeStyle = "#79e2c6";
   ctx.lineWidth = 1.05;
   ctx.beginPath();
   for (let c = 0; c < rw; c++) {
@@ -813,7 +944,7 @@ function drawScope(progress) {
 
   if (progress >= 0) {
     const px = rx0 + progress * rw;
-    ctx.strokeStyle = "#e85d3f";
+    ctx.strokeStyle = "#ff99ad";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(px, wy0);
@@ -846,7 +977,7 @@ function drawScope(progress) {
     ctx.moveTo(rx0, sy1 - 2);
     ctx.lineTo(rx0 + rw, sy1 - 2);
   }
-  ctx.strokeStyle = hasLive ? "#d99b38" : "#2b3644";
+  ctx.strokeStyle = hasLive ? "#ffd278" : "#2b3644";
   ctx.lineWidth = 1.25;
   ctx.stroke();
   if (hasLive) {
@@ -857,7 +988,7 @@ function drawScope(progress) {
     ctx.fill();
   }
 
-  ctx.fillStyle = "#657180";
+  ctx.fillStyle = "#c0afc9";
   ctx.font = "9.5px ui-monospace, SFMono-Regular, Menlo, monospace";
   for (const [hzT, lbl] of [[1000, "1k"], [3000, "3k"], [5500, "5.5k"]]) {
     const lx = rx0 + (hzT / 6000) * rw;
@@ -871,8 +1002,11 @@ function drawScope(progress) {
 elPlay.addEventListener("click", () => {
   if (curSource) stopPlay(); else startPlay();
 });
+elInput.addEventListener("pointerdown", () => { if (curSource) stopPlay(); });
+elInput.addEventListener("input", clearTake);
+elInput.addEventListener("focus", () => { if (curSource) stopPlay(); });
 elInput.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter") { ev.preventDefault(); startPlay(); }
+  if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); startPlay(); }
 });
 elScope.addEventListener("click", () => startPlay());
 
@@ -901,7 +1035,7 @@ presetBtns.forEach((btn) => {
 });
 
 for (const sl of [slHz, slBreath, slRate]) {
-  sl.addEventListener("input", updateKnobText);
+  sl.addEventListener("input", () => { updateKnobText(); clearTake(); });
   sl.addEventListener("change", () => startPlay());
 }
 
@@ -925,56 +1059,9 @@ window.addEventListener("message", (ev) => {
 
 window.addEventListener("resize", () => drawScope(-1));
 
-// Fallback unlock: if browser autoplay policy holds AudioContext suspended, speak on first tap anywhere
-const onFirstGesture = (ev) => {
-  if (!awaitingUnlock || autoPlayDone) return;
-  const t = ev.target;
-  const isInteractive = t && t.closest && t.closest("button, input, a, label, #scope");
-  if (isInteractive) {
-    autoPlayDone = true;
-    hideAutoPrompt();
-    return;
-  }
-  startPlay();
-};
-window.addEventListener("pointerdown", onFirstGesture, { capture: true });
-window.addEventListener("keydown", onFirstGesture, { capture: true });
-
-// Boot: immediately synthesize & attempt auto-speak on open (with clean autoplay-policy fallback)
+// Keep the first waveform empty until an explicit play or WAV export.
 updateKnobText();
-(() => {
-  const params = new URLSearchParams(window.location.search || "");
-  const wantAuto = params.get("autoplay") !== "0";
-  const ctx = wantAuto ? ensureAudio() : null;
-  const resumeP = (ctx && ctx.state === "suspended")
-    ? ctx.resume().catch(() => {})
-    : Promise.resolve();
-
-  synthesizeIfNeeded();
-  drawScope(-1);
-
-  if (!wantAuto || !ctx) return;
-
-  const launchIfReady = () => {
-    if (!autoPlayDone && ctx.state === "running") {
-      startPlay();
-      return true;
-    }
-    return false;
-  };
-
-  if (launchIfReady()) return;
-
-  ctx.addEventListener("statechange", () => {
-    launchIfReady();
-  });
-  resumeP.then(() => {
-    if (!launchIfReady() && !autoPlayDone) showAutoPrompt();
-  });
-  setTimeout(() => {
-    if (!autoPlayDone && !launchIfReady()) showAutoPrompt();
-  }, 180);
-})();
+drawScope(-1);
 })();
 </script>
 </body>
@@ -986,9 +1073,9 @@ const shareHtml = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="tokiko (KUDA ${VERSION}) — ${ENGINE_KB}KB・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
+<meta name="description" content="tokiko (KUDA ${VERSION}) — ソース ${kb(rawSrc)}・重み0B・依存ゼロの純JS 4分岐ケリー・ロックバウム物理声道管シンセサイザ。Xの正方形カード上でそのまま日本語を喋ります。">
 <meta name="twitter:card" content="player">
-<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
+<meta name="twitter:title" content="tokiko / KUDA ${VERSION} — ソース ${kb(rawSrc)}・重み0Bの仮想発声器官（純JS）">
 <meta name="twitter:description" content="録音0Byte・学習モデルなし。4分岐ケリー・ロックバウム声道導波管（口31+鼻23+副鼻腔10+梨状窩3）だけで日本語を喋る純JS仮想発声器官。カード上でそのまま声道を動かして聴けます。">
 <meta name="twitter:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
 <meta name="twitter:player" content="${PAGES_BASE}/player.html?v=${PLAYER_REV}">
@@ -996,7 +1083,7 @@ const shareHtml = `<!DOCTYPE html>
 <meta name="twitter:player:height" content="480">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${PAGES_BASE}/">
-<meta property="og:title" content="tokiko / KUDA ${VERSION} — ${ENGINE_KB}KB・重み0Bの仮想発声器官（純JS）">
+<meta property="og:title" content="tokiko / KUDA ${VERSION} — ソース ${kb(rawSrc)}・重み0Bの仮想発声器官（純JS）">
 <meta property="og:description" content="録音0Byte・学習モデルなし。4分岐声道導波管だけで日本語を喋る純JS仮想発声器官。">
 <meta property="og:image" content="${PAGES_BASE}/assets/tokiko_square.jpg">
 <meta property="og:image:width" content="1024">
@@ -1097,6 +1184,28 @@ const shareHtml = `<!DOCTYPE html>
     body { padding: 12px 8px 24px; }
     .frame-shell { aspect-ratio: auto; height: 480px; }
   }
+  .details { min-width: 0; display: grid; gap: 16px; align-content: start; }
+  .details h1 { margin: 0; font-size: 30px; line-height: 1.1; }
+  .details small { color: var(--muted); font-size: 14px; }
+  .sizes { border-block: 1px solid var(--border); padding: 14px 0; }
+  .sizes h2 { font-size: 15px; margin: 0 0 12px; }
+  .sizes dl { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 0; font-size: 13px; }
+  .sizes code, .sizes p { color: var(--muted); font-size: 12px; }
+  .sizes dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .sizes p { margin: 14px 0 0; }
+  .details a { color: var(--text); }
+  @media (min-width: 840px) {
+    .wrap { max-width: 900px; display: grid; grid-template-columns: 480px 1fr; align-items: start; gap: 28px; margin-top: 5vh; }
+    .details { padding-top: 8px; }
+  }
+
+  :root { --bg:#fbf3de; --surface:#fffcf0; --text:#382e40; --muted:#655665; --dim:#665766; --border:#b4a09b; --brass:#854237; --teal:#14685e; }
+  body { background: radial-gradient(#d8cbb6 1px,transparent 1px) 0 0 / 16px 16px, var(--bg); }
+  .frame-shell { border: 2px solid #443547; border-radius: 20px; box-shadow: 0 5px #443547; }
+  .details { background: var(--surface); padding:18px; border:1px solid var(--border); border-radius:16px; }
+  .details h1 { letter-spacing:-.07em; } .details small { letter-spacing:0; }
+  .btn.primary { color:#34283a; background:#ff9988; border-color:#443547; box-shadow:0 2px #443547; }
+  .btn.primary:hover { color:#34283a; }
 </style>
 </head>
 <body>
@@ -1107,19 +1216,32 @@ const shareHtml = `<!DOCTYPE html>
       sandbox="allow-popups allow-same-origin allow-scripts allow-presentation"></iframe>
   </div>
 
+  <aside class="details">
+  <h1>tokiko <small>/ KUDA</small></h1>
   <div class="actions">
-    <button id="wavOutBtn" class="btn" type="button">↓ WAV保存</button>
-    <button id="copyUrlBtn" class="btn primary" type="button">X投稿用URLをコピー</button>
-    <a class="btn" href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub (${ENGINE_KB}KB 純JS) ↗</a>
+    <button id="wavOutBtn" class="btn primary" type="button">↓ WAV保存</button>
+    <button id="copyUrlBtn" class="btn" type="button">URLをコピー</button>
+
   </div>
 
+  <section class="sizes">
+    <h2>コード容量</h2>
+    <dl>
+      <dt>エンジン原本 <code>kuda.mjs</code></dt><dd>${exactSize(rawSrc)}</dd>
+      <dt>埋め込みエンジン</dt><dd>${exactSize(compactEngine)}</dd>
+      <dt>プレイヤー全体 <code>player.html</code></dt><dd>${exactSize(playerHtml)}</dd>
+      <dt>学習済みモデルの重み</dt><dd>0 B</dd>
+    </dl>
+    <p>圧縮前の UTF-8 容量。原本にはコメントと CLI を含みます。プレイヤー全体には埋め込みエンジンと操作画面を含みます。</p>
+  </section>
   <section class="ver-panel" aria-label="バージョン情報">
     <div class="vh">
       <span><strong>${VERSION}</strong> · Virtual Vocal Organ KUDA</span>
-      <span>MIT · 0B Weights</span>
+      <span><a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub ↗</a> · MIT</span>
     </div>
     <div>変更内容: ${VERSION_NOTE}</div>
   </section>
+  </aside>
 </main>
 <script>
 const playerFrame = document.getElementById("playerFrame");
@@ -1153,7 +1275,7 @@ document.getElementById("copyUrlBtn").addEventListener("click", function () {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => {
       btn.textContent = "✓ コピーしました";
-      setTimeout(() => { btn.textContent = "X投稿用URLをコピー"; }, 2000);
+      setTimeout(() => { btn.textContent = "URLをコピー"; }, 2000);
     });
   }
 });
@@ -1165,4 +1287,4 @@ document.getElementById("copyUrlBtn").addEventListener("click", function () {
 fs.writeFileSync(path.join(OUT_DIR, "player.html"), playerHtml, "utf8");
 fs.writeFileSync(path.join(OUT_DIR, "index.html"), shareHtml, "utf8");
 
-console.log(`Built ${VERSION} -> player.html (${Math.round(Buffer.byteLength(playerHtml) / 1024)} KB), index.html (${Math.round(Buffer.byteLength(shareHtml) / 1024)} KB)`);
+console.log(`Built ${VERSION} -> player.html (${kb(playerHtml)}), index.html (${kb(shareHtml)})`);
